@@ -2,19 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  DollarSign,
-  PiggyBank,
-  Settings,
-  LayoutDashboard,
-} from "lucide-react";
+import { DollarSign, PiggyBank, Settings, LayoutDashboard } from "lucide-react";
 import Logo from "./Logo";
 
 // Navigation items
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transactions", icon: DollarSign },
-  { href: "/planning", label: "Budget", icon: PiggyBank },
+  { href: "/planning", label: "Planning", icon: PiggyBank },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

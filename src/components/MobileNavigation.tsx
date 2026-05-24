@@ -17,7 +17,7 @@ import Logo from "./Logo";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transactions", icon: DollarSign },
-  { href: "/planning", label: "Budget", icon: PiggyBank },
+  { href: "/planning", label: "Planning", icon: PiggyBank },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -25,7 +25,7 @@ const navItems = [
 const bottomTabItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transactions", icon: DollarSign },
-  { href: "/planning", label: "Budget", icon: PiggyBank },
+  { href: "/planning", label: "Planning", icon: PiggyBank },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
