@@ -1,25 +1,23 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
-  Target,
-  TrendingUp,
-  Calendar,
-  DollarSign,
-  Plane,
-  Home,
-  Car,
-  GraduationCap,
-  Heart,
-  Shield,
-  Plus,
-  Edit3,
-  Trash2,
-  Sparkles,
-  Calculator,
   PiggyBank,
-  ChevronLeft,
-  ChevronRight,
+  Target,
+  Calendar,
+  CreditCard,
+  ShoppingCart,
+  Plus,
+  Trash2,
+  Edit3,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Clock,
+  TrendingDown,
+  DollarSign,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import {
@@ -28,1019 +26,742 @@ import {
   deleteGoal as removeGoal,
   type Goal as ReduxGoal,
 } from "@/store/slices/goalsSlice";
-import {
-  setSelectedMonth,
-  createLocalBudgetPlan,
-  logLocalTransaction,
-  BucketType,
-} from "@/store/slices/budgetSlice";
 import { selectIncomes } from "@/store/slices/incomeSlice";
-import { addExpense, type Expense } from "@/store/slices/expensesSlice";
+import { selectExpenses } from "@/store/slices/expensesSlice";
 import type { RootState } from "@/store/index";
-import { formatAmount, getCurrencyByCode } from "@/utils/currency";
-import ResponsiveModal, { useMobileModal } from "@/components/ui/MobileModal";
-import BudgetBucketCard from "@/components/budget/BudgetBucketCard";
-import TransactionForm from "@/components/budget/TransactionForm";
-import BudgetInsightsPanel from "@/components/budget/BudgetInsightsPanel";
+import { api, Commitment, Debt, PurchaseDecisionResult } from "@/lib/api";
 
-type GoalCategory =
-  | "emergency-fund"
-  | "debt-reduction"
-  | "travel"
-  | "purchase"
-  | "investment"
-  | "education"
-  | "health"
-  | "other";
+// ─── Helpers ───────────────────────────────────────────────────────────────
+function fmt(n: number) {
+  return new Intl.NumberFormat("en-AE", { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
+}
 
-const goalCategories = [
-  {
-    value: "travel",
-    name: "Vacation & Travel",
-    icon: Plane,
-    color: "bg-blue-100 text-blue-800",
-    description: "Travel and vacation expenses",
-  },
-  {
-    value: "emergency-fund",
-    name: "Emergency Fund",
-    icon: Shield,
-    color: "bg-red-100 text-red-800",
-    description: "3-6 months of expenses",
-  },
-  {
-    value: "purchase",
-    name: "Home & Property",
-    icon: Home,
-    color: "bg-green-100 text-green-800",
-    description: "House down payment, furniture",
-  },
-  {
-    value: "vehicle",
-    name: "Vehicle",
-    icon: Car,
-    color: "bg-gray-100 text-gray-800",
-    description: "Car purchase or maintenance",
-  },
-  {
-    value: "education",
-    name: "Education",
-    icon: GraduationCap,
-    color: "bg-purple-100 text-purple-800",
-    description: "Courses, degrees, certifications",
-  },
-  {
-    value: "health",
-    name: "Health & Wellness",
-    icon: Heart,
-    color: "bg-pink-100 text-pink-800",
-    description: "Medical, fitness, wellness",
-  },
-  {
-    value: "investment",
-    name: "Investment",
-    icon: TrendingUp,
-    color: "bg-yellow-100 text-yellow-800",
-    description: "Stocks, bonds, business",
-  },
-  {
-    value: "other",
-    name: "Other",
-    icon: Target,
-    color: "bg-indigo-100 text-indigo-800",
-    description: "Custom financial goals",
-  },
-] as const;
+// ─── Budget Tab (Simplified) ───────────────────────────────────────────────
+const DEFAULT_CATEGORIES = ["Housing", "Food", "Transport", "Utilities", "Health", "Education", "Entertainment", "Other"];
 
-type ActiveTab = "budget" | "goals";
+function BudgetTab() {
+  const incomes = useAppSelector(selectIncomes);
+  const expenses = useAppSelector(selectExpenses);
+  const [limits, setLimits] = useState<Record<string, number>>(() => {
+    if (typeof window === "undefined") return {};
+    try { return JSON.parse(localStorage.getItem("wp_budget_limits") || "{}"); } catch { return {}; }
+  });
+  const [editCat, setEditCat] = useState<string | null>(null);
+  const [editVal, setEditVal] = useState("");
 
-export default function BudgetGoalsPage() {
-  const dispatch = useAppDispatch();
-  const goals = useAppSelector((state: RootState) => state.goals?.goals || []);
-  const expenses = useAppSelector(
-    (state: RootState) => state.expenses?.expenses || []
-  );
-  const { selectedMonth, currentPlan, allPlans, insights, loading } =
-    useAppSelector((state) => state.budget);
-  const { settings } = useAppSelector((state) => state.settings);
-  const incomeEntries = useAppSelector(selectIncomes);
-  const [isClient, setIsClient] = useState(false);
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const totalIncome = incomes
+    .filter((i) => i.eventDate?.startsWith(monthKey))
+    .reduce((s, i) => s + (i.amount ?? 0), 0);
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState<ActiveTab>("budget");
+  const spendByCategory: Record<string, number> = {};
+  expenses.forEach((e) => {
+    if (!e.date?.startsWith(monthKey)) return;
+    const cat = e.category || "Other";
+    spendByCategory[cat] = (spendByCategory[cat] || 0) + (e.amount ?? 0);
+  });
 
-  // Goal modal states
-  const addGoalModal = useMobileModal();
-  const editGoalModal = useMobileModal();
-  const [editingGoal, setEditingGoal] = useState<ReduxGoal | null>(null);
-  const [aiAnalysisModal, setAiAnalysisModal] = useState<ReduxGoal | null>(
-    null
-  );
+  const allCats = Array.from(new Set([...DEFAULT_CATEGORIES, ...Object.keys(spendByCategory)]));
+  const totalSpent = Object.values(spendByCategory).reduce((s, v) => s + v, 0);
 
-  // Budget states
-  const [showTransactionForm, setShowTransactionForm] = useState(false);
-  const [selectedBucket, setSelectedBucket] = useState<BucketType>("NEEDS");
-  const [isCreating, setIsCreating] = useState(false);
-
-  // Get currency from settings
-  const baseCurrency = settings?.currency || "USD";
-  const currency = getCurrencyByCode(baseCurrency);
-
-  useEffect(() => {
-    setIsClient(true);
-    document.title = "Budget & Goals - WealthPulse";
-  }, []);
-
-  // Calculate total monthly income from income entries for the SELECTED month
-  const totalMonthlyIncome = useMemo(() => {
-    const [selectedYear, selectedMonthNum] = selectedMonth
-      .split("-")
-      .map(Number);
-
-    return incomeEntries
-      .filter((income) => {
-        const incomeDate = new Date(income.eventDate);
-        return (
-          incomeDate.getMonth() === selectedMonthNum - 1 &&
-          incomeDate.getFullYear() === selectedYear
-        );
-      })
-      .reduce((sum, income) => sum + income.amount, 0);
-  }, [incomeEntries, selectedMonth]);
-
-  // Find plan for selected month from allPlans
-  const activePlan = useMemo(() => {
-    return allPlans.find((p) => p.month === selectedMonth) || currentPlan;
-  }, [allPlans, selectedMonth, currentPlan]);
-
-  // Calculate month navigation
-  const { prevMonth, nextMonth, displayMonth } = useMemo(() => {
-    const [year, month] = selectedMonth.split("-").map(Number);
-    const current = new Date(year, month - 1);
-
-    const prev = new Date(year, month - 2);
-    const next = new Date(year, month);
-
-    return {
-      prevMonth: `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(
-        2,
-        "0"
-      )}`,
-      nextMonth: `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(
-        2,
-        "0"
-      )}`,
-      displayMonth: current.toLocaleDateString("en-US", {
-        month: "long",
-        year: "numeric",
-      }),
-    };
-  }, [selectedMonth]);
-
-  // Goal helpers
-  const getGoalProgress = (goal: ReduxGoal) => {
-    const progress = (goal.currentAmount / goal.targetAmount) * 100;
-    return Math.min(progress, 100);
+  const saveLimit = (cat: string, val: string) => {
+    const updated = { ...limits, [cat]: Number(val) || 0 };
+    setLimits(updated);
+    localStorage.setItem("wp_budget_limits", JSON.stringify(updated));
+    setEditCat(null);
   };
-
-  const getDaysRemaining = (deadline: string) => {
-    const today = new Date();
-    const targetDate = new Date(deadline);
-    const diffTime = targetDate.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
-  };
-
-  // Calculate overall goal stats
-  const goalStats = useMemo(() => {
-    if (goals.length === 0)
-      return { total: 0, saved: 0, avgProgress: 0, activeCount: 0 };
-
-    const total = goals.reduce((sum, g) => sum + g.targetAmount, 0);
-    const saved = goals.reduce((sum, g) => sum + g.currentAmount, 0);
-    const avgProgress =
-      goals.reduce((sum, g) => sum + getGoalProgress(g), 0) / goals.length;
-    const activeCount = goals.filter(
-      (g) => g.currentAmount < g.targetAmount
-    ).length;
-
-    return { total, saved, avgProgress, activeCount };
-  }, [goals]);
-
-  // Budget handlers
-  const handleCreatePlan = () => {
-    setIsCreating(true);
-
-    const incomeToUse = totalMonthlyIncome > 0 ? totalMonthlyIncome : 5000;
-
-    dispatch(
-      createLocalBudgetPlan({
-        month: selectedMonth,
-        baseCurrency,
-        totalIncome: incomeToUse,
-      })
-    );
-
-    setIsCreating(false);
-  };
-
-  const handleLogTransaction = (transaction: {
-    bucket: BucketType;
-    category: string;
-    amount: number;
-    currency: string;
-    description?: string;
-  }) => {
-    dispatch(logLocalTransaction(transaction));
-
-    if (transaction.bucket === "NEEDS" || transaction.bucket === "WANTS") {
-      const newExpense = {
-        id: `budget-${Date.now()}`,
-        amount: transaction.amount,
-        description: transaction.description || transaction.category,
-        category: transaction.category,
-        date: new Date().toISOString(),
-        currency: transaction.currency,
-        isRecurring: false,
-        source: "budget" as const,
-      };
-      dispatch(addExpense(newExpense));
-    }
-
-    setShowTransactionForm(false);
-  };
-
-  // Goal handlers
-  const handleAddGoal = (goalData: Partial<ReduxGoal>) => {
-    const newGoal: ReduxGoal = {
-      id: Date.now().toString(),
-      title: goalData.title || "",
-      description: goalData.description,
-      category: goalData.category || "travel",
-      targetAmount: goalData.targetAmount || 0,
-      currentAmount: 0,
-      currency: goalData.currency || baseCurrency,
-      targetDate: goalData.targetDate,
-      priority: goalData.priority || "medium",
-      status: "active",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    dispatch(addGoal(newGoal));
-    addGoalModal.closeModal();
-  };
-
-  const handleEditGoal = (goalData: Partial<ReduxGoal>) => {
-    if (editingGoal) {
-      dispatch(
-        updateGoal({
-          id: editingGoal.id,
-          updates: goalData,
-        })
-      );
-      setEditingGoal(null);
-      editGoalModal.closeModal();
-    }
-  };
-
-  const deleteGoal = (goalId: string) => {
-    if (confirm("Are you sure you want to delete this goal?")) {
-      dispatch(removeGoal(goalId));
-    }
-  };
-
-  const updateGoalProgress = (goalId: string, amount: number) => {
-    const goal = goals.find((g) => g.id === goalId);
-    if (goal) {
-      dispatch(
-        updateGoal({
-          id: goalId,
-          updates: {
-            currentAmount: Math.max(0, Math.min(goal.targetAmount, amount)),
-          },
-        })
-      );
-    }
-  };
-
-  const startEditGoal = (goal: ReduxGoal) => {
-    setEditingGoal(goal);
-    editGoalModal.openModal();
-  };
-
-  // AI-powered goal analysis
-  const analyzeGoalWithAI = async (goal: ReduxGoal) => {
-    const monthlyExpenses = expenses.reduce(
-      (total: number, expense: Expense) => {
-        const expenseDate = new Date(expense.date);
-        const lastMonth = new Date();
-        lastMonth.setMonth(lastMonth.getMonth() - 1);
-
-        if (expenseDate >= lastMonth) {
-          return total + expense.amount;
-        }
-        return total;
-      },
-      0
-    );
-
-    const averageMonthlyExpense = monthlyExpenses || 2000;
-    const daysRemaining = getDaysRemaining(goal.targetDate || "");
-    const monthsRemaining = daysRemaining / 30;
-    const remainingAmount = goal.targetAmount - goal.currentAmount;
-    const monthlyTarget =
-      monthsRemaining > 0 ? remainingAmount / monthsRemaining : remainingAmount;
-
-    let feasibility: "easy" | "moderate" | "challenging" = "moderate";
-    const targetPercentage = (monthlyTarget / averageMonthlyExpense) * 100;
-
-    if (targetPercentage < 10) feasibility = "easy";
-    else if (targetPercentage > 25) feasibility = "challenging";
-
-    let recommendation = "";
-    if (feasibility === "easy") {
-      recommendation = `Great! You can easily reach this goal by saving ${formatAmount(
-        monthlyTarget,
-        getCurrencyByCode(goal.currency)
-      )} per month.`;
-    } else if (feasibility === "challenging") {
-      recommendation = `This goal is ambitious! Consider extending the deadline or reducing expenses to free up ${formatAmount(
-        monthlyTarget,
-        getCurrencyByCode(goal.currency)
-      )}/month.`;
-    } else {
-      recommendation = `This goal is achievable with discipline. Save ${formatAmount(
-        monthlyTarget,
-        getCurrencyByCode(goal.currency)
-      )} monthly.`;
-    }
-
-    const aiInsights = {
-      feasibility,
-      suggestions: [recommendation],
-      monthlyRequired: monthlyTarget,
-      timeframe: `${Math.ceil(monthsRemaining)} months`,
-      confidence: expenses.length > 0 ? 0.85 : 0.6,
-    };
-
-    dispatch(
-      updateGoal({
-        id: goal.id,
-        updates: { aiAnalysis: aiInsights },
-      })
-    );
-    setAiAnalysisModal({ ...goal, aiAnalysis: aiInsights });
-  };
-
-  if (!isClient) {
-    return <div className='container mx-auto px-4 py-8'>Loading...</div>;
-  }
 
   return (
-    <div className='container mx-auto px-4 py-4 md:py-8 space-y-6'>
-      {/* Header */}
-      <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4'>
-        <div>
-          <h1 className='text-2xl md:text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2'>
-            <PiggyBank className='text-blue-600' size={32} />
-            Budget & Goals
-          </h1>
-          <p className='text-gray-600 dark:text-gray-400 mt-1'>
-            Plan your budget and track savings goals
+    <div className="space-y-5">
+      {/* Summary */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+          <p className="text-xs text-gray-500">Monthly Income</p>
+          <p className="text-lg font-bold text-green-700">AED {fmt(totalIncome)}</p>
+        </div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+          <p className="text-xs text-gray-500">Total Spent</p>
+          <p className="text-lg font-bold text-red-600">AED {fmt(totalSpent)}</p>
+        </div>
+        <div className={`border rounded-xl p-3 text-center ${totalIncome - totalSpent >= 0 ? "bg-blue-50 border-blue-200" : "bg-orange-50 border-orange-200"}`}>
+          <p className="text-xs text-gray-500">Remaining</p>
+          <p className={`text-lg font-bold ${totalIncome - totalSpent >= 0 ? "text-blue-700" : "text-orange-600"}`}>
+            AED {fmt(totalIncome - totalSpent)}
           </p>
         </div>
-        <button
-          onClick={
-            activeTab === "budget" ? handleCreatePlan : addGoalModal.openModal
-          }
-          disabled={activeTab === "budget" && isCreating}
-          className='flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50'>
-          <Plus size={20} />
-          <span>
-            {activeTab === "budget" ? "Create Budget Plan" : "Add Goal"}
-          </span>
-        </button>
       </div>
 
-      {/* Summary Cards */}
-      <div className='grid grid-cols-2 md:grid-cols-4 gap-4'>
-        <div className='bg-gradient-to-br from-blue-500 to-blue-600 text-white p-4 md:p-6 rounded-lg shadow-md'>
-          <div className='flex items-center justify-between'>
-            <div>
-              <p className='text-blue-100 text-xs md:text-sm'>Monthly Income</p>
-              <p className='text-xl md:text-2xl font-bold mt-1'>
-                {formatAmount(totalMonthlyIncome, currency)}
-              </p>
-            </div>
-            <DollarSign size={28} className='text-blue-200' />
-          </div>
-        </div>
+      <p className="text-xs text-gray-400">Click the pencil icon to set a monthly limit per category.</p>
 
-        <div className='bg-gradient-to-br from-green-500 to-green-600 text-white p-4 md:p-6 rounded-lg shadow-md'>
-          <div className='flex items-center justify-between'>
-            <div>
-              <p className='text-green-100 text-xs md:text-sm'>Goals Saved</p>
-              <p className='text-xl md:text-2xl font-bold mt-1'>
-                {formatAmount(goalStats.saved, currency)}
-              </p>
-            </div>
-            <Target size={28} className='text-green-200' />
-          </div>
-        </div>
-
-        <div className='bg-gradient-to-br from-purple-500 to-purple-600 text-white p-4 md:p-6 rounded-lg shadow-md'>
-          <div className='flex items-center justify-between'>
-            <div>
-              <p className='text-purple-100 text-xs md:text-sm'>Avg Progress</p>
-              <p className='text-xl md:text-2xl font-bold mt-1'>
-                {goalStats.avgProgress.toFixed(0)}%
-              </p>
-            </div>
-            <TrendingUp size={28} className='text-purple-200' />
-          </div>
-        </div>
-
-        <div className='bg-gradient-to-br from-orange-500 to-orange-600 text-white p-4 md:p-6 rounded-lg shadow-md'>
-          <div className='flex items-center justify-between'>
-            <div>
-              <p className='text-orange-100 text-xs md:text-sm'>Active Goals</p>
-              <p className='text-xl md:text-2xl font-bold mt-1'>
-                {goalStats.activeCount}
-              </p>
-            </div>
-            <Sparkles size={28} className='text-orange-200' />
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className='flex border-b border-gray-200 dark:border-gray-700'>
-        <button
-          onClick={() => setActiveTab("budget")}
-          className={`flex items-center gap-2 px-6 py-3 font-medium border-b-2 transition-colors ${
-            activeTab === "budget"
-              ? "border-blue-600 text-blue-600"
-              : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
-          }`}>
-          <Calculator size={20} />
-          Budget Planner
-        </button>
-        <button
-          onClick={() => setActiveTab("goals")}
-          className={`flex items-center gap-2 px-6 py-3 font-medium border-b-2 transition-colors ${
-            activeTab === "goals"
-              ? "border-green-600 text-green-600"
-              : "border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400"
-          }`}>
-          <Target size={20} />
-          Savings Goals ({goals.length})
-        </button>
-      </div>
-
-      {/* Budget Tab Content */}
-      {activeTab === "budget" && (
-        <div className='space-y-6'>
-          {/* Month Navigation */}
-          <div className='flex items-center justify-center gap-4 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm'>
-            <button
-              onClick={() => dispatch(setSelectedMonth(prevMonth))}
-              className='p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full'>
-              <ChevronLeft size={20} />
-            </button>
-            <h2 className='text-xl font-semibold text-gray-900 dark:text-white min-w-[200px] text-center'>
-              {displayMonth}
-            </h2>
-            <button
-              onClick={() => dispatch(setSelectedMonth(nextMonth))}
-              className='p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full'>
-              <ChevronRight size={20} />
-            </button>
-          </div>
-
-          {/* Budget Content */}
-          {!activePlan ? (
-            <div className='text-center py-12 bg-white dark:bg-gray-800 rounded-lg shadow-sm'>
-              <Calculator size={64} className='mx-auto text-gray-300 mb-4' />
-              <h3 className='text-xl font-medium text-gray-900 dark:text-white mb-2'>
-                No Budget Plan for {displayMonth}
-              </h3>
-              <p className='text-gray-600 dark:text-gray-400 mb-2'>
-                Monthly Income: {formatAmount(totalMonthlyIncome, currency)}
-              </p>
-              <p className='text-gray-600 dark:text-gray-400 mb-6'>
-                Create a budget plan using the 50/30/20 rule to manage your
-                spending.
-              </p>
-              <button
-                onClick={handleCreatePlan}
-                disabled={isCreating}
-                className='inline-flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50'>
-                <Plus size={20} />
-                <span>Create Budget Plan</span>
-              </button>
-            </div>
-          ) : (
-            <div className='space-y-6'>
-              {/* Budget Overview */}
-              <div className='bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm'>
-                <h3 className='text-lg font-semibold text-gray-900 dark:text-white mb-4'>
-                  Budget Overview
-                </h3>
-                <div className='grid grid-cols-2 md:grid-cols-4 gap-4'>
-                  <div className='text-center p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg'>
-                    <p className='text-sm text-gray-600 dark:text-gray-400'>
-                      Total Income
-                    </p>
-                    <p className='text-xl font-bold text-blue-600'>
-                      {formatAmount(activePlan.totalIncome.amount, currency)}
-                    </p>
-                  </div>
-                  <div className='text-center p-4 bg-green-50 dark:bg-green-900/20 rounded-lg'>
-                    <p className='text-sm text-gray-600 dark:text-gray-400'>
-                      Needs (50%)
-                    </p>
-                    <p className='text-xl font-bold text-green-600'>
-                      {formatAmount(
-                        activePlan.buckets.NEEDS.planned.amount,
-                        currency
-                      )}
-                    </p>
-                  </div>
-                  <div className='text-center p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg'>
-                    <p className='text-sm text-gray-600 dark:text-gray-400'>
-                      Wants (30%)
-                    </p>
-                    <p className='text-xl font-bold text-yellow-600'>
-                      {formatAmount(
-                        activePlan.buckets.WANTS.planned.amount,
-                        currency
-                      )}
-                    </p>
-                  </div>
-                  <div className='text-center p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg'>
-                    <p className='text-sm text-gray-600 dark:text-gray-400'>
-                      Savings (15%)
-                    </p>
-                    <p className='text-xl font-bold text-purple-600'>
-                      {formatAmount(
-                        activePlan.buckets.SAVINGS.planned.amount,
-                        currency
-                      )}
-                    </p>
-                  </div>
+      {/* Category rows */}
+      <div className="space-y-2">
+        {allCats.map((cat) => {
+          const spent = spendByCategory[cat] || 0;
+          const limit = limits[cat] || 0;
+          const pct = limit > 0 ? Math.min(100, (spent / limit) * 100) : 0;
+          const over = limit > 0 && spent > limit;
+          return (
+            <div key={cat} className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-gray-800">{cat}</span>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm font-semibold ${over ? "text-red-600" : "text-gray-700"}`}>
+                    AED {fmt(spent)}{limit > 0 ? ` / ${fmt(limit)}` : ""}
+                  </span>
+                  <button onClick={() => { setEditCat(cat); setEditVal(String(limits[cat] || "")); }}
+                    className="text-gray-400 hover:text-blue-600">
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
-
-              {/* Budget Buckets */}
-              <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
-                {Object.values(activePlan.buckets).map((bucket) => (
-                  <BudgetBucketCard
-                    key={bucket.type}
-                    bucket={bucket}
-                    onClick={() => {
-                      setSelectedBucket(bucket.type as BucketType);
-                      setShowTransactionForm(true);
-                    }}
-                  />
-                ))}
-              </div>
-
-              {/* Insights Panel */}
-              <BudgetInsightsPanel insights={insights} />
+              {editCat === cat && (
+                <div className="flex items-center gap-2 mt-1">
+                  <input type="number" value={editVal} onChange={(e) => setEditVal(e.target.value)}
+                    placeholder="Monthly limit (AED)"
+                    className="border border-gray-300 rounded-lg px-2 py-1 text-xs w-40" />
+                  <button onClick={() => saveLimit(cat, editVal)}
+                    className="text-xs bg-blue-600 text-white px-2 py-1 rounded-lg hover:bg-blue-700">Save</button>
+                  <button onClick={() => setEditCat(null)} className="text-xs text-gray-500">Cancel</button>
+                </div>
+              )}
+              {limit > 0 && (
+                <div className="w-full bg-gray-100 rounded-full h-1.5 mt-1">
+                  <div className={`h-1.5 rounded-full transition-all ${over ? "bg-red-400" : "bg-blue-400"}`}
+                    style={{ width: `${pct}%` }} />
+                </div>
+              )}
             </div>
-          )}
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-          {/* Transaction Form Modal */}
-          {showTransactionForm && (
-            <TransactionForm
-              bucket={selectedBucket}
-              plan={activePlan}
-              onSubmit={handleLogTransaction}
-              onClose={() => setShowTransactionForm(false)}
-              isLoading={loading}
-            />
-          )}
+// ─── Goals Tab (Simple) ────────────────────────────────────────────────────
+const emptyGoalForm = { title: "", targetAmount: "", currentAmount: "0", currency: "AED", targetDate: "" };
+
+function GoalsTab() {
+  const dispatch = useAppDispatch();
+  const goals = useAppSelector((s: RootState) => s.goals?.goals ?? []);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(emptyGoalForm);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [progressId, setProgressId] = useState<string | null>(null);
+  const [progressVal, setProgressVal] = useState("");
+
+  const handleSave = () => {
+    if (!form.title || !form.targetAmount) return;
+    if (editId) {
+      dispatch(updateGoal({ id: editId, updates: { title: form.title, targetAmount: Number(form.targetAmount), currentAmount: Number(form.currentAmount), currency: form.currency, targetDate: form.targetDate || undefined } }));
+      setEditId(null);
+    } else {
+      dispatch(addGoal({ id: Date.now().toString(), title: form.title, targetAmount: Number(form.targetAmount), currentAmount: Number(form.currentAmount) || 0, currency: form.currency, targetDate: form.targetDate || undefined, category: "other", priority: "medium", status: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
+    }
+    setForm(emptyGoalForm);
+    setShowForm(false);
+  };
+
+  const startEdit = (g: ReduxGoal) => {
+    setEditId(g.id);
+    setForm({ title: g.title, targetAmount: String(g.targetAmount), currentAmount: String(g.currentAmount), currency: g.currency, targetDate: g.targetDate || "" });
+    setShowForm(true);
+  };
+
+  const saveProgress = (id: string) => {
+    dispatch(updateGoal({ id, updates: { currentAmount: Number(progressVal) } }));
+    setProgressId(null);
+    setProgressVal("");
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex justify-end">
+        <button onClick={() => { setShowForm(!showForm); setEditId(null); setForm(emptyGoalForm); }}
+          className="flex items-center gap-2 bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700">
+          <Plus className="w-4 h-4" /> Add Goal
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
+          <h3 className="text-sm font-semibold text-gray-800">{editId ? "Edit Goal" : "New Goal"}</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs text-gray-600 mb-1">Goal Name *</label>
+              <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="e.g. Emergency Fund" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Target Amount *</label>
+              <input type="number" value={form.targetAmount} onChange={(e) => setForm((f) => ({ ...f, targetAmount: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Saved So Far</label>
+              <input type="number" value={form.currentAmount} onChange={(e) => setForm((f) => ({ ...f, currentAmount: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Currency</label>
+              <select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option>AED</option><option>INR</option><option>USD</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Target Date</label>
+              <input type="date" value={form.targetDate} onChange={(e) => setForm((f) => ({ ...f, targetDate: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={handleSave} className="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-blue-700">Save</button>
+            <button onClick={() => { setShowForm(false); setEditId(null); }} className="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+          </div>
         </div>
       )}
 
-      {/* Goals Tab Content */}
-      {activeTab === "goals" && (
-        <div className='space-y-6'>
-          {goals.length === 0 ? (
-            <div className='text-center py-12 bg-white dark:bg-gray-800 rounded-lg shadow-sm'>
-              <Target size={64} className='mx-auto text-gray-300 mb-4' />
-              <h3 className='text-xl font-medium text-gray-900 dark:text-white mb-2'>
-                No Goals Yet
-              </h3>
-              <p className='text-gray-600 dark:text-gray-400 mb-6'>
-                Start tracking your financial goals with AI-powered insights!
-              </p>
-              <button
-                onClick={addGoalModal.openModal}
-                className='inline-flex items-center space-x-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors'>
-                <Plus size={20} />
-                <span>Create Your First Goal</span>
-              </button>
-            </div>
-          ) : (
-            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
-              {(goals as ReduxGoal[]).map((goal: ReduxGoal) => {
-                const category = goalCategories.find(
-                  (c) => c.value === goal.category
-                );
-                const progress = getGoalProgress(goal);
-                const daysRemaining = getDaysRemaining(goal.targetDate || "");
-                const Icon = category?.icon || Target;
-
-                return (
-                  <div
-                    key={goal.id}
-                    className='bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 hover:shadow-md transition-shadow'>
-                    {/* Goal Header */}
-                    <div className='p-6 pb-4'>
-                      <div className='flex items-start justify-between mb-4'>
-                        <div className='flex items-center space-x-3'>
-                          <div
-                            className={`p-2 rounded-lg ${
-                              category?.color || "bg-gray-100 text-gray-800"
-                            }`}>
-                            <Icon size={20} />
-                          </div>
-                          <div>
-                            <h3 className='font-semibold text-gray-900 dark:text-white'>
-                              {goal.title}
-                            </h3>
-                            <p className='text-sm text-gray-600 dark:text-gray-400'>
-                              {category?.name}
-                            </p>
-                          </div>
-                        </div>
-                        <div className='flex space-x-1'>
-                          <button
-                            onClick={() => startEditGoal(goal)}
-                            className='p-1 text-gray-400 hover:text-blue-600'>
-                            <Edit3 size={16} />
-                          </button>
-                          <button
-                            onClick={() => deleteGoal(goal.id)}
-                            className='p-1 text-gray-400 hover:text-red-600'>
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Progress */}
-                      <div className='space-y-2'>
-                        <div className='flex justify-between text-sm'>
-                          <span className='text-gray-600 dark:text-gray-400'>
-                            Progress
-                          </span>
-                          <span className='font-medium text-gray-900 dark:text-white'>
-                            {progress.toFixed(1)}%
-                          </span>
-                        </div>
-                        <div className='w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2'>
-                          <div
-                            className='bg-green-600 h-2 rounded-full transition-all duration-300'
-                            style={{ width: `${progress}%` }}
-                          />
-                        </div>
-                        <div className='flex justify-between text-sm'>
-                          <span className='text-green-600 font-medium'>
-                            {formatAmount(
-                              goal.currentAmount,
-                              getCurrencyByCode(goal.currency)
-                            )}
-                          </span>
-                          <span className='text-gray-600 dark:text-gray-400'>
-                            of{" "}
-                            {formatAmount(
-                              goal.targetAmount,
-                              getCurrencyByCode(goal.currency)
-                            )}
-                          </span>
-                        </div>
-                      </div>
+      {goals.length === 0 ? (
+        <p className="text-center text-gray-400 text-sm py-8">No goals yet. Add your first savings goal!</p>
+      ) : (
+        <div className="space-y-3">
+          {goals.map((g) => {
+            const pct = g.targetAmount > 0 ? Math.min(100, (g.currentAmount / g.targetAmount) * 100) : 0;
+            return (
+              <div key={g.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900">{g.title}</p>
+                    <p className="text-sm text-gray-600 mt-0.5">
+                      {g.currency} {fmt(g.currentAmount)} of {fmt(g.targetAmount)}
+                      {g.targetDate && <span className="text-xs text-gray-400 ml-2">→ {g.targetDate}</span>}
+                    </p>
+                    <div className="w-full bg-gray-100 rounded-full h-2 mt-2">
+                      <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
                     </div>
-
-                    {/* Goal Footer */}
-                    <div className='px-6 pb-6 space-y-3'>
-                      {/* Days Remaining */}
-                      <div className='flex items-center justify-between text-sm'>
-                        <span className='text-gray-600 dark:text-gray-400 flex items-center gap-1'>
-                          <Calendar size={14} />
-                          {daysRemaining > 0
-                            ? `${daysRemaining} days left`
-                            : "Overdue"}
-                        </span>
-                        {goal.aiAnalysis && (
-                          <span className='flex items-center gap-1 text-purple-600 text-xs'>
-                            <Sparkles size={12} />
-                            AI Optimized
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Action Buttons */}
-                      <div className='flex gap-2'>
-                        <button
-                          onClick={() => {
-                            const newAmount = prompt(
-                              "Enter new saved amount:",
-                              goal.currentAmount.toString()
-                            );
-                            if (newAmount)
-                              updateGoalProgress(
-                                goal.id,
-                                parseFloat(newAmount)
-                              );
-                          }}
-                          className='flex-1 px-3 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors'>
-                          Update Progress
-                        </button>
-                        <button
-                          onClick={() => analyzeGoalWithAI(goal)}
-                          className='px-3 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors'>
-                          <Sparkles size={16} />
-                        </button>
-                      </div>
-                    </div>
+                    <p className="text-xs text-gray-400 mt-1">{pct.toFixed(0)}% complete</p>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  <div className="flex gap-2 ml-3">
+                    <button onClick={() => { setProgressId(g.id); setProgressVal(String(g.currentAmount)); }}
+                      className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded hover:bg-green-100">
+                      Update
+                    </button>
+                    <button onClick={() => startEdit(g)} className="text-gray-400 hover:text-blue-600">
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => dispatch(removeGoal(g.id))} className="text-red-400 hover:text-red-600">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+                {progressId === g.id && (
+                  <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                    <input type="number" value={progressVal} onChange={(e) => setProgressVal(e.target.value)}
+                      placeholder="Current saved amount"
+                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-48" />
+                    <button onClick={() => saveProgress(g.id)}
+                      className="bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-green-700">Save</button>
+                    <button onClick={() => setProgressId(null)} className="text-xs text-gray-500">Cancel</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      )}
-
-      {/* Add Goal Modal */}
-      <ResponsiveModal
-        isOpen={addGoalModal.isOpen}
-        onClose={addGoalModal.closeModal}
-        title='Create New Goal'>
-        <GoalForm
-          onSubmit={handleAddGoal}
-          onCancel={addGoalModal.closeModal}
-          currency={baseCurrency}
-        />
-      </ResponsiveModal>
-
-      {/* Edit Goal Modal */}
-      <ResponsiveModal
-        isOpen={editGoalModal.isOpen}
-        onClose={editGoalModal.closeModal}
-        title='Edit Goal'>
-        {editingGoal && (
-          <GoalForm
-            onSubmit={handleEditGoal}
-            onCancel={editGoalModal.closeModal}
-            currency={baseCurrency}
-            initialData={editingGoal}
-          />
-        )}
-      </ResponsiveModal>
-
-      {/* AI Analysis Modal */}
-      {aiAnalysisModal && (
-        <ResponsiveModal
-          isOpen={!!aiAnalysisModal}
-          onClose={() => setAiAnalysisModal(null)}
-          title='AI Goal Analysis'>
-          <div className='space-y-4'>
-            <div className='flex items-center gap-2'>
-              <Sparkles className='text-purple-600' size={24} />
-              <h3 className='text-lg font-semibold'>{aiAnalysisModal.title}</h3>
-            </div>
-
-            {aiAnalysisModal.aiAnalysis && (
-              <>
-                <div
-                  className={`p-4 rounded-lg ${
-                    aiAnalysisModal.aiAnalysis.feasibility === "easy"
-                      ? "bg-green-100 text-green-800"
-                      : aiAnalysisModal.aiAnalysis.feasibility === "challenging"
-                      ? "bg-red-100 text-red-800"
-                      : "bg-yellow-100 text-yellow-800"
-                  }`}>
-                  <p className='font-medium'>
-                    Feasibility:{" "}
-                    {aiAnalysisModal.aiAnalysis.feasibility
-                      .charAt(0)
-                      .toUpperCase() +
-                      aiAnalysisModal.aiAnalysis.feasibility.slice(1)}
-                  </p>
-                  <p className='text-sm mt-1'>
-                    Timeframe: {aiAnalysisModal.aiAnalysis.timeframe}
-                  </p>
-                  <p className='text-sm'>
-                    Monthly Required:{" "}
-                    {formatAmount(
-                      aiAnalysisModal.aiAnalysis.monthlyRequired,
-                      getCurrencyByCode(aiAnalysisModal.currency)
-                    )}
-                  </p>
-                </div>
-
-                <div className='space-y-2'>
-                  <h4 className='font-medium text-gray-900 dark:text-white'>
-                    Recommendations:
-                  </h4>
-                  <ul className='list-disc pl-5 space-y-1 text-gray-600 dark:text-gray-400'>
-                    {aiAnalysisModal.aiAnalysis.suggestions.map(
-                      (suggestion, i) => (
-                        <li key={i}>{suggestion}</li>
-                      )
-                    )}
-                  </ul>
-                </div>
-
-                <p className='text-sm text-gray-500'>
-                  Confidence:{" "}
-                  {(aiAnalysisModal.aiAnalysis.confidence * 100).toFixed(0)}%
-                </p>
-              </>
-            )}
-
-            <button
-              onClick={() => setAiAnalysisModal(null)}
-              className='w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700'>
-              Close
-            </button>
-          </div>
-        </ResponsiveModal>
       )}
     </div>
   );
 }
 
-// Goal Form Component
-interface GoalFormProps {
-  onSubmit: (data: Partial<ReduxGoal>) => void;
-  onCancel: () => void;
-  currency: string;
-  initialData?: ReduxGoal;
-}
+// ─── Commitments Tab ────────────────────────────────────────────────────────
+const PRIORITY_COLORS: Record<string, string> = {
+  HIGH: "bg-red-100 text-red-700 border-red-200",
+  MEDIUM: "bg-yellow-100 text-yellow-700 border-yellow-200",
+  LOW: "bg-gray-100 text-gray-600 border-gray-200",
+};
+const COMMIT_STATUS_COLORS: Record<string, string> = {
+  UPCOMING: "bg-blue-100 text-blue-700",
+  PAID: "bg-green-100 text-green-700",
+  MISSED: "bg-red-100 text-red-700",
+};
+const emptyCommitForm = { title: "", amount: "", currency: "AED", dueDate: "", category: "", priority: "MEDIUM", recurringType: "NONE", status: "UPCOMING", notes: "" };
 
-function GoalForm({
-  onSubmit,
-  onCancel,
-  currency,
-  initialData,
-}: GoalFormProps) {
-  const [formData, setFormData] = useState({
-    title: initialData?.title || "",
-    description: initialData?.description || "",
-    category: initialData?.category || "travel",
-    targetAmount: initialData?.targetAmount || 0,
-    currentAmount: initialData?.currentAmount || 0,
-    currency: initialData?.currency || currency,
-    targetDate: initialData?.targetDate || "",
-    priority: initialData?.priority || "medium",
-  });
+function CommitmentsTab() {
+  const [items, setItems] = useState<Commitment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(emptyCommitForm);
+  const [saving, setSaving] = useState(false);
+  const [filter, setFilter] = useState("UPCOMING");
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit(formData);
+  const load = () => {
+    setLoading(true);
+    api.getCommitments().then(setItems).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async () => {
+    if (!form.title || !form.amount || !form.dueDate) return;
+    setSaving(true);
+    try {
+      await api.createCommitment({ title: form.title, amount: Number(form.amount), currency: form.currency, exchangeRate: 1, convertedAmount: Number(form.amount), dueDate: form.dueDate, category: form.category || undefined, priority: form.priority as Commitment["priority"], recurringType: form.recurringType, status: form.status as Commitment["status"], notes: form.notes || undefined });
+      setForm(emptyCommitForm); setShowForm(false); load();
+    } finally { setSaving(false); }
   };
 
+  const filtered = items.filter((i) => filter === "ALL" ? true : i.status === filter);
+  const upcomingTotal = items.filter((i) => i.status === "UPCOMING").reduce((s, i) => s + i.convertedAmount, 0);
+
   return (
-    <form onSubmit={handleSubmit} className='space-y-4'>
-      <div>
-        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
-          Goal Title
-        </label>
-        <input
-          type='text'
-          value={formData.title}
-          onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-          placeholder='e.g., Vacation to Japan'
-          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'
-          required
-        />
-      </div>
-
-      <div>
-        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
-          Category
-        </label>
-        <select
-          value={formData.category}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              category: e.target.value as GoalCategory,
-            })
-          }
-          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'>
-          {goalCategories.map((cat) => (
-            <option key={cat.value} value={cat.value}>
-              {cat.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className='grid grid-cols-2 gap-4'>
-        <div>
-          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
-            Target Amount
-          </label>
-          <input
-            type='number'
-            step='0.01'
-            min='0'
-            value={formData.targetAmount}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                targetAmount: parseFloat(e.target.value) || 0,
-              })
-            }
-            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'
-            required
-          />
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm flex items-center gap-3">
+          <Calendar className="w-5 h-5 text-purple-500" />
+          <div>
+            <p className="text-xs text-gray-500">Upcoming total</p>
+            <p className="text-lg font-bold text-purple-600">AED {fmt(upcomingTotal)}</p>
+          </div>
+          <span className="ml-4 text-xs text-gray-400">
+            {items.filter((i) => i.status === "UPCOMING").length} upcoming · {items.filter((i) => i.status === "MISSED").length} missed
+          </span>
         </div>
-        <div>
-          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
-            Current Amount
-          </label>
-          <input
-            type='number'
-            step='0.01'
-            min='0'
-            value={formData.currentAmount}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                currentAmount: parseFloat(e.target.value) || 0,
-              })
-            }
-            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'
-          />
-        </div>
-      </div>
-
-      <div className='grid grid-cols-2 gap-4'>
-        <div>
-          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
-            Target Date
-          </label>
-          <input
-            type='date'
-            value={formData.targetDate}
-            onChange={(e) =>
-              setFormData({ ...formData, targetDate: e.target.value })
-            }
-            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'
-          />
-        </div>
-        <div>
-          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
-            Priority
-          </label>
-          <select
-            value={formData.priority}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                priority: e.target.value as "low" | "medium" | "high",
-              })
-            }
-            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'>
-            <option value='low'>Low</option>
-            <option value='medium'>Medium</option>
-            <option value='high'>High</option>
-          </select>
-        </div>
-      </div>
-
-      <div>
-        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
-          Description (optional)
-        </label>
-        <textarea
-          value={formData.description}
-          onChange={(e) =>
-            setFormData({ ...formData, description: e.target.value })
-          }
-          rows={2}
-          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'
-        />
-      </div>
-
-      <div className='flex gap-3 pt-4'>
-        <button
-          type='button'
-          onClick={onCancel}
-          className='flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700'>
-          Cancel
-        </button>
-        <button
-          type='submit'
-          className='flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700'>
-          Save Goal
+        <button onClick={() => setShowForm(!showForm)}
+          className="flex items-center gap-2 bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700">
+          <Plus className="w-4 h-4" /> Add
         </button>
       </div>
-    </form>
+
+      {showForm && (
+        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
+          <h3 className="text-sm font-semibold text-gray-800">New Commitment</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs text-gray-600 mb-1">Title *</label>
+              <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Amount *</label>
+              <input type="number" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Currency</label>
+              <select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option>AED</option><option>INR</option><option>USD</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Due Date *</label>
+              <input type="date" value={form.dueDate} onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Priority</label>
+              <select value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="HIGH">High</option><option value="MEDIUM">Medium</option><option value="LOW">Low</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Recurring</label>
+              <select value={form.recurringType} onChange={(e) => setForm((f) => ({ ...f, recurringType: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="NONE">None</option><option value="MONTHLY">Monthly</option><option value="YEARLY">Yearly</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Category</label>
+              <input value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="e.g. Rent, Insurance" />
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={handleCreate} disabled={saving}
+              className="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button onClick={() => setShowForm(false)} className="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        {["UPCOMING", "PAID", "MISSED", "ALL"].map((f) => (
+          <button key={f} onClick={() => setFilter(f)}
+            className={`text-xs font-medium px-3 py-1.5 rounded-full border transition-colors ${filter === f ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}`}>
+            {f}
+          </button>
+        ))}
+      </div>
+
+      {loading ? <p className="text-center text-gray-500 text-sm">Loading…</p>
+        : error ? <p className="text-red-500 text-sm">{error}</p>
+        : filtered.length === 0 ? <p className="text-center text-gray-400 text-sm py-8">No commitments in this view.</p>
+        : (
+          <div className="space-y-3">
+            {filtered.map((c) => (
+              <div key={c.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-gray-900">{c.title}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${PRIORITY_COLORS[c.priority] ?? ""}`}>{c.priority}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${COMMIT_STATUS_COLORS[c.status] ?? ""}`}>{c.status}</span>
+                  </div>
+                  <div className="flex gap-4 mt-1 text-sm">
+                    <span className="font-semibold text-gray-800">{c.currency} {fmt(c.amount)}</span>
+                    <span className="text-gray-400 text-xs">Due {c.dueDate}</span>
+                    {c.category && <span className="text-gray-400 text-xs">{c.category}</span>}
+                    {c.recurringType !== "NONE" && <span className="text-xs bg-blue-50 text-blue-600 px-1.5 rounded">{c.recurringType}</span>}
+                  </div>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  {c.status === "UPCOMING" && (
+                    <button onClick={async () => { await api.updateCommitment(c.id, { status: "PAID" }); load(); }}
+                      className="text-xs flex items-center gap-1 bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded hover:bg-green-100">
+                      <CheckCircle2 className="w-3 h-3" /> Paid
+                    </button>
+                  )}
+                  <button onClick={async () => { if (!confirm("Delete?")) return; await api.deleteCommitment(c.id); load(); }}
+                    className="text-xs text-red-400 hover:text-red-600">
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+    </div>
+  );
+}
+
+// ─── Debt Strategy Tab ──────────────────────────────────────────────────────
+const DEBT_STATUS_COLORS: Record<string, string> = {
+  ACTIVE: "bg-yellow-100 text-yellow-700",
+  PAID: "bg-green-100 text-green-700",
+  OVERDUE: "bg-red-100 text-red-700",
+};
+const emptyDebtForm = { debtName: "", lenderName: "", totalAmount: "", remainingBalance: "", monthlyPayment: "", interestRate: "0", currency: "AED", dueDate: "", debtType: "loan", notes: "", status: "ACTIVE" };
+
+function DebtStrategyTab() {
+  const [debts, setDebts] = useState<Debt[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(emptyDebtForm);
+  const [saving, setSaving] = useState(false);
+  const [paymentId, setPaymentId] = useState<string | null>(null);
+  const [paymentAmt, setPaymentAmt] = useState("");
+
+  const load = () => {
+    setLoading(true);
+    api.getDebts().then(setDebts).catch((e) => setError(e.message)).finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleCreate = async () => {
+    if (!form.debtName || !form.totalAmount || !form.remainingBalance || !form.monthlyPayment) return;
+    setSaving(true);
+    try {
+      await api.createDebt({ debtName: form.debtName, lenderName: form.lenderName || undefined, totalAmount: Number(form.totalAmount), currency: form.currency, exchangeRate: 1, convertedTotalAmount: Number(form.totalAmount), remainingBalance: Number(form.remainingBalance), monthlyPayment: Number(form.monthlyPayment), interestRate: Number(form.interestRate), dueDate: form.dueDate || undefined, debtType: form.debtType || undefined, status: form.status as Debt["status"], notes: form.notes || undefined });
+      setForm(emptyDebtForm); setShowForm(false); load();
+    } finally { setSaving(false); }
+  };
+
+  const totalOwed = debts.filter((d) => d.status === "ACTIVE").reduce((s, d) => s + d.remainingBalance, 0);
+  const totalMonthly = debts.filter((d) => d.status === "ACTIVE").reduce((s, d) => s + d.monthlyPayment, 0);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
+          <div className="flex items-center gap-2 mb-1"><CreditCard className="w-4 h-4 text-orange-500" /><span className="text-xs text-gray-500">Total Owed</span></div>
+          <p className="text-xl font-bold text-orange-600">AED {fmt(totalOwed)}</p>
+        </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm">
+          <div className="flex items-center gap-2 mb-1"><TrendingDown className="w-4 h-4 text-red-500" /><span className="text-xs text-gray-500">Monthly Payments</span></div>
+          <p className="text-xl font-bold text-red-600">AED {fmt(totalMonthly)}</p>
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <button onClick={() => setShowForm(!showForm)}
+          className="flex items-center gap-2 bg-blue-600 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-blue-700">
+          <Plus className="w-4 h-4" /> Add Debt
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
+          <h3 className="text-sm font-semibold text-gray-800">New Debt</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { key: "debtName", label: "Debt Name", required: true },
+              { key: "lenderName", label: "Lender" },
+              { key: "totalAmount", label: "Total Amount", type: "number", required: true },
+              { key: "remainingBalance", label: "Remaining Balance", type: "number", required: true },
+              { key: "monthlyPayment", label: "Monthly Payment", type: "number", required: true },
+              { key: "interestRate", label: "Interest Rate %", type: "number" },
+              { key: "dueDate", label: "Due Date", type: "date" },
+            ].map(({ key, label, type = "text", required }) => (
+              <div key={key}>
+                <label className="block text-xs text-gray-600 mb-1">{label}{required && " *"}</label>
+                <input type={type} value={(form as Record<string, string>)[key]}
+                  onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            ))}
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Currency</label>
+              <select value={form.currency} onChange={(e) => setForm((f) => ({ ...f, currency: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option>AED</option><option>INR</option><option>USD</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Type</label>
+              <select value={form.debtType} onChange={(e) => setForm((f) => ({ ...f, debtType: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="loan">Loan</option><option value="credit_card">Credit Card</option><option value="personal">Personal</option><option value="emi">EMI</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Notes</label>
+            <textarea value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} rows={2}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div className="flex gap-3">
+            <button onClick={handleCreate} disabled={saving}
+              className="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? "Saving…" : "Save Debt"}
+            </button>
+            <button onClick={() => setShowForm(false)} className="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {loading ? <p className="text-center text-gray-500 text-sm">Loading…</p>
+        : error ? <p className="text-red-500 text-sm">{error}</p>
+        : debts.length === 0 ? <p className="text-center text-gray-400 text-sm py-8">No debts recorded. Add one above.</p>
+        : (
+          <div className="space-y-3">
+            {debts.map((d) => (
+              <div key={d.id} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-gray-900">{d.debtName}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${DEBT_STATUS_COLORS[d.status] ?? ""}`}>{d.status}</span>
+                      {d.debtType && <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{d.debtType}</span>}
+                    </div>
+                    {d.lenderName && <p className="text-xs text-gray-500 mt-0.5">{d.lenderName}</p>}
+                    <div className="flex gap-6 mt-2 text-sm">
+                      <span><span className="text-gray-400 text-xs">Remaining:</span> <strong className="text-orange-600">{d.currency} {fmt(d.remainingBalance)}</strong></span>
+                      <span><span className="text-gray-400 text-xs">Monthly:</span> <strong>{d.currency} {fmt(d.monthlyPayment)}</strong></span>
+                      {d.interestRate > 0 && <span className="text-xs text-gray-500">{d.interestRate}% p.a.</span>}
+                    </div>
+                    <div className="mt-2 w-full bg-gray-100 rounded-full h-1.5">
+                      <div className="bg-orange-400 h-1.5 rounded-full" style={{ width: `${Math.min(100, ((d.totalAmount - d.remainingBalance) / d.totalAmount) * 100)}%` }} />
+                    </div>
+                    <p className="text-xs text-gray-400 mt-1">{fmt(((d.totalAmount - d.remainingBalance) / d.totalAmount) * 100)}% paid</p>
+                  </div>
+                  <div className="flex gap-2 ml-3 shrink-0">
+                    <button onClick={() => { setPaymentId(d.id); setPaymentAmt(""); }}
+                      className="text-xs flex items-center gap-1 bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded hover:bg-green-100">
+                      <DollarSign className="w-3 h-3" /> Pay
+                    </button>
+                    <button onClick={async () => { if (!confirm("Delete this debt?")) return; await api.deleteDebt(d.id); load(); }}
+                      className="text-xs flex items-center gap-1 text-red-500 hover:text-red-700">
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+                {paymentId === d.id && (
+                  <div className="mt-3 flex items-center gap-2 pt-3 border-t border-gray-100">
+                    <input type="number" placeholder="Payment amount" value={paymentAmt}
+                      onChange={(e) => setPaymentAmt(e.target.value)}
+                      className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm w-48" />
+                    <button onClick={async () => { if (!paymentAmt || Number(paymentAmt) <= 0) return; await api.recordDebtPayment(d.id, Number(paymentAmt)); setPaymentId(null); setPaymentAmt(""); load(); }}
+                      className="bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-green-700">Record</button>
+                    <button onClick={() => setPaymentId(null)} className="text-xs text-gray-500">Cancel</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+    </div>
+  );
+}
+
+// ─── Purchase Decision Tab ──────────────────────────────────────────────────
+const DECISION_CONFIG: Record<string, { label: string; color: string; icon: typeof CheckCircle2; bg: string }> = {
+  SAFE_TO_BUY: { label: "Safe to Buy! ✓", color: "text-green-700", bg: "bg-green-50 border-green-200", icon: CheckCircle2 },
+  WAIT_3_MONTHS: { label: "Wait 3 Months", color: "text-yellow-700", bg: "bg-yellow-50 border-yellow-200", icon: Clock },
+  WAIT_6_MONTHS: { label: "Wait 6 Months", color: "text-orange-700", bg: "bg-orange-50 border-orange-200", icon: Clock },
+  BUY_LOWER_MODEL: { label: "Consider a Cheaper Option", color: "text-blue-700", bg: "bg-blue-50 border-blue-200", icon: AlertTriangle },
+  AVOID_FOR_NOW: { label: "Avoid for Now", color: "text-red-700", bg: "bg-red-50 border-red-200", icon: XCircle },
+};
+
+function PurchaseDecisionTab() {
+  const [itemName, setItemName] = useState("");
+  const [price, setPrice] = useState("5000");
+  const [emiMonths, setEmiMonths] = useState("12");
+  const [result, setResult] = useState<PurchaseDecisionResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCheck = async () => {
+    setLoading(true); setError(null);
+    try {
+      const r = await api.getPurchaseDecision(itemName, Number(price), Number(emiMonths));
+      setResult(r);
+    } catch (e: unknown) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  };
+
+  const cfg = result ? DECISION_CONFIG[result.decision] : null;
+
+  return (
+    <div className="max-w-xl space-y-5">
+      <p className="text-sm text-gray-500">
+        Enter what you want to buy, its price, and your preferred payment plan. The engine analyses your financial health and recommends.
+      </p>
+      <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
+        <div>
+          <label className="block text-xs text-gray-600 mb-1">What are you buying? (optional)</label>
+          <input type="text" value={itemName} onChange={(e) => setItemName(e.target.value)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="e.g. MacBook Pro, Car, Vacation…" />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">Item Price (AED)</label>
+            <input type="number" value={price} onChange={(e) => setPrice(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-600 mb-1">EMI Months (0 = one-time)</label>
+            <input type="number" value={emiMonths} onChange={(e) => setEmiMonths(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" min="0" max="48" />
+          </div>
+        </div>
+        {Number(emiMonths) > 0 && Number(price) > 0 && (
+          <p className="text-xs text-gray-500">Monthly EMI: AED {(Number(price) / Number(emiMonths)).toFixed(0)}</p>
+        )}
+        <button onClick={handleCheck} disabled={loading || !price}
+          className="w-full bg-blue-600 text-white font-medium py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+          {loading ? "Analysing…" : "Check Decision"}
+        </button>
+      </div>
+
+      {error && <p className="text-red-500 text-sm">{error}</p>}
+
+      {result && cfg && (
+        <div className={`rounded-xl border p-5 space-y-4 ${cfg.bg}`}>
+          <div className="flex items-center gap-3">
+            <cfg.icon className={`w-7 h-7 ${cfg.color}`} />
+            <div>
+              {itemName && <p className="text-xs text-gray-500 font-medium mb-0.5">{itemName}</p>}
+              <p className={`text-xl font-bold ${cfg.color}`}>{cfg.label}</p>
+              <p className="text-xs text-gray-500">Score: {result.score}/100</p>
+            </div>
+          </div>
+          <ul className="space-y-1">
+            {result.reasons.map((r, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                <span className="mt-0.5 text-gray-400">•</span> {r}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-gray-400 pt-2 border-t border-gray-200">
+            AED {result.input.itemPrice} over {result.input.emiMonths} months
+            {result.input.emiMonths > 0 && ` (AED ${result.input.monthlyEmi.toFixed(0)}/mo)`}
+          </p>
+        </div>
+      )}
+
+      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs text-gray-500 space-y-1">
+        <p className="font-medium text-gray-600">Decision Criteria:</p>
+        <p>• Emergency fund ≥ 3 months expenses</p>
+        <p>• Debt-to-income ratio ≤ 30%</p>
+        <p>• Item EMI ≤ 10–15% of monthly income</p>
+        <p>• Monthly surplus stays positive after purchase</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tab definitions ────────────────────────────────────────────────────────
+type TabId = "budget" | "goals" | "commitments" | "debts" | "purchase";
+
+const TABS: { id: TabId; label: string; icon: typeof PiggyBank }[] = [
+  { id: "budget", label: "Budget", icon: PiggyBank },
+  { id: "goals", label: "Goals", icon: Target },
+  { id: "commitments", label: "Commitments", icon: Calendar },
+  { id: "debts", label: "Debt Strategy", icon: CreditCard },
+  { id: "purchase", label: "Purchase Decision", icon: ShoppingCart },
+];
+
+// ─── Main Planning Page ─────────────────────────────────────────────────────
+export default function PlanningPage() {
+  const [activeTab, setActiveTab] = useState<TabId>("budget");
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const active = TABS.find((t) => t.id === activeTab)!;
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <PiggyBank className="text-blue-600 w-7 h-7" /> Planning
+        </h1>
+        <p className="text-sm text-gray-500 mt-1">Budget, goals, commitments, debts, and purchase decisions in one place.</p>
+      </div>
+
+      {/* Desktop tab bar */}
+      <div className="hidden sm:flex gap-1 bg-gray-100 rounded-xl p-1">
+        {TABS.map((t) => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)}
+            className={`flex-1 flex items-center justify-center gap-1.5 text-sm font-medium py-2 px-3 rounded-lg transition-colors ${activeTab === t.id ? "bg-white text-blue-700 shadow-sm" : "text-gray-600 hover:text-gray-900"}`}>
+            <t.icon className="w-4 h-4" />
+            <span className="hidden md:inline">{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Mobile tab selector */}
+      <div className="sm:hidden">
+        <button onClick={() => setMobileOpen(!mobileOpen)}
+          className="w-full flex items-center justify-between bg-white border border-gray-200 rounded-xl px-4 py-3 shadow-sm">
+          <span className="flex items-center gap-2 text-sm font-medium text-blue-700">
+            <active.icon className="w-4 h-4" /> {active.label}
+          </span>
+          {mobileOpen ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+        </button>
+        {mobileOpen && (
+          <div className="mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+            {TABS.map((t) => (
+              <button key={t.id} onClick={() => { setActiveTab(t.id); setMobileOpen(false); }}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm text-left transition-colors ${activeTab === t.id ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700 hover:bg-gray-50"}`}>
+                <t.icon className="w-4 h-4" /> {t.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Tab content */}
+      <div>
+        {activeTab === "budget" && <BudgetTab />}
+        {activeTab === "goals" && <GoalsTab />}
+        {activeTab === "commitments" && <CommitmentsTab />}
+        {activeTab === "debts" && <DebtStrategyTab />}
+        {activeTab === "purchase" && <PurchaseDecisionTab />}
+      </div>
+    </div>
   );
 }
