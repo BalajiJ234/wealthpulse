@@ -3,11 +3,11 @@
  * Base URL is read from NEXT_PUBLIC_API_URL env var (defaults to localhost:3001).
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
   });
   if (!res.ok) {
@@ -19,10 +19,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 // ─── Types ─────────────────────────────────────────────────────────────────
-export type TransactionType = 'INCOME' | 'EXPENSE' | 'DEBT_PAYMENT' | 'SAVING' | 'TRANSFER';
-export type DebtStatus = 'ACTIVE' | 'PAID' | 'OVERDUE';
-export type CommitmentPriority = 'HIGH' | 'MEDIUM' | 'LOW';
-export type CommitmentStatus = 'UPCOMING' | 'PAID' | 'MISSED';
+export type TransactionType =
+  | "INCOME"
+  | "EXPENSE"
+  | "DEBT_PAYMENT"
+  | "SAVING"
+  | "TRANSFER";
+export type DebtStatus = "ACTIVE" | "PAID" | "OVERDUE";
+export type CommitmentPriority = "HIGH" | "MEDIUM" | "LOW";
+export type CommitmentStatus = "UPCOMING" | "PAID" | "MISSED";
 
 export interface Transaction {
   id: string;
@@ -98,7 +103,7 @@ export interface DashboardSummary {
 
 export interface FinancialHealth {
   score: number;
-  grade: 'A' | 'B' | 'C' | 'D';
+  grade: "A" | "B" | "C" | "D";
   month: string;
   metrics: {
     dti: number;
@@ -110,13 +115,18 @@ export interface FinancialHealth {
   trend: { month: string; surplus: number }[];
 }
 
-export type IPhoneDecision = 'SAFE_TO_BUY' | 'WAIT_3_MONTHS' | 'WAIT_6_MONTHS' | 'BUY_LOWER_MODEL' | 'AVOID_FOR_NOW';
+export type PurchaseDecision =
+  | "SAFE_TO_BUY"
+  | "WAIT_3_MONTHS"
+  | "WAIT_6_MONTHS"
+  | "BUY_LOWER_MODEL"
+  | "AVOID_FOR_NOW";
 
-export interface IPhoneDecisionResult {
-  decision: IPhoneDecision;
+export interface PurchaseDecisionResult {
+  decision: PurchaseDecision;
   reasons: string[];
   score: number;
-  input: { iphonePrice: number; emiMonths: number; monthlyEmi: number };
+  input: { itemPrice: number; emiMonths: number; monthlyEmi: number };
 }
 
 export interface MonthlySnapshot {
@@ -131,56 +141,96 @@ export interface MonthlySnapshot {
 // ─── API methods ───────────────────────────────────────────────────────────
 export const api = {
   // Dashboard
-  getDashboardSummary: () => request<DashboardSummary>('/api/dashboard/summary'),
-  getFinancialHealth: () => request<FinancialHealth>('/api/dashboard/financial-health'),
-  getIPhoneDecision: (price: number, emiMonths: number) =>
-    request<IPhoneDecisionResult>(`/api/dashboard/iphone-decision?iphonePrice=${price}&emiMonths=${emiMonths}`),
-  getFutureImpact: (purchaseAmount: number, emiMonths: number, projectionMonths = 24) =>
-    request<{ projection: { months: number; savings: number; surplus: number }[]; baseSurplus: number }>(
-      `/api/dashboard/future-impact?purchaseAmount=${purchaseAmount}&emiMonths=${emiMonths}&projectionMonths=${projectionMonths}`
+  getDashboardSummary: () =>
+    request<DashboardSummary>("/api/dashboard/summary"),
+  getFinancialHealth: () =>
+    request<FinancialHealth>("/api/dashboard/financial-health"),
+  getPurchaseDecision: (itemName: string, price: number, emiMonths: number) =>
+    request<PurchaseDecisionResult>(
+      `/api/dashboard/purchase-decision?itemPrice=${price}&emiMonths=${emiMonths}`,
+    ),
+  getFutureImpact: (
+    purchaseAmount: number,
+    emiMonths: number,
+    projectionMonths = 24,
+  ) =>
+    request<{
+      projection: { months: number; savings: number; surplus: number }[];
+      baseSurplus: number;
+    }>(
+      `/api/dashboard/future-impact?purchaseAmount=${purchaseAmount}&emiMonths=${emiMonths}&projectionMonths=${projectionMonths}`,
     ),
   getMonthlySnapshots: (months = 6) =>
-    request<MonthlySnapshot[]>(`/api/dashboard/monthly-snapshot?months=${months}`),
+    request<MonthlySnapshot[]>(
+      `/api/dashboard/monthly-snapshot?months=${months}`,
+    ),
 
   // Transactions
   getTransactions: (params?: Record<string, string>) => {
-    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
     return request<Transaction[]>(`/api/transactions${qs}`);
   },
-  createTransaction: (data: Omit<Transaction, 'id' | 'userId' | 'createdAt' | 'updatedAt'>) =>
-    request<Transaction>('/api/transactions', { method: 'POST', body: JSON.stringify(data) }),
+  createTransaction: (
+    data: Omit<Transaction, "id" | "userId" | "createdAt" | "updatedAt">,
+  ) =>
+    request<Transaction>("/api/transactions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   updateTransaction: (id: string, data: Partial<Transaction>) =>
-    request<Transaction>(`/api/transactions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    request<Transaction>(`/api/transactions/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
   deleteTransaction: (id: string) =>
-    request<void>(`/api/transactions/${id}`, { method: 'DELETE' }),
+    request<void>(`/api/transactions/${id}`, { method: "DELETE" }),
   bulkCreateTransactions: (transactions: unknown[]) =>
-    request('/api/transactions/bulk', { method: 'POST', body: JSON.stringify({ transactions }) }),
+    request("/api/transactions/bulk", {
+      method: "POST",
+      body: JSON.stringify({ transactions }),
+    }),
   getMonthlySummary: (month?: string) => {
-    const qs = month ? `?month=${month}` : '';
+    const qs = month ? `?month=${month}` : "";
     return request(`/api/transactions/monthly-summary${qs}`);
   },
 
   // Debts
   getDebts: (status?: string) => {
-    const qs = status ? `?status=${status}` : '';
+    const qs = status ? `?status=${status}` : "";
     return request<Debt[]>(`/api/debts${qs}`);
   },
-  createDebt: (data: Omit<Debt, 'id' | 'userId' | 'createdAt' | 'updatedAt'>) =>
-    request<Debt>('/api/debts', { method: 'POST', body: JSON.stringify(data) }),
+  createDebt: (data: Omit<Debt, "id" | "userId" | "createdAt" | "updatedAt">) =>
+    request<Debt>("/api/debts", { method: "POST", body: JSON.stringify(data) }),
   updateDebt: (id: string, data: Partial<Debt>) =>
-    request<Debt>(`/api/debts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteDebt: (id: string) => request<void>(`/api/debts/${id}`, { method: 'DELETE' }),
+    request<Debt>(`/api/debts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteDebt: (id: string) =>
+    request<void>(`/api/debts/${id}`, { method: "DELETE" }),
   recordDebtPayment: (id: string, paymentAmount: number) =>
-    request<Debt>(`/api/debts/${id}/payment`, { method: 'PATCH', body: JSON.stringify({ paymentAmount }) }),
+    request<Debt>(`/api/debts/${id}/payment`, {
+      method: "PATCH",
+      body: JSON.stringify({ paymentAmount }),
+    }),
 
   // Commitments
   getCommitments: (params?: Record<string, string>) => {
-    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    const qs = params ? "?" + new URLSearchParams(params).toString() : "";
     return request<Commitment[]>(`/api/commitments${qs}`);
   },
-  createCommitment: (data: Omit<Commitment, 'id' | 'userId' | 'createdAt' | 'updatedAt'>) =>
-    request<Commitment>('/api/commitments', { method: 'POST', body: JSON.stringify(data) }),
+  createCommitment: (
+    data: Omit<Commitment, "id" | "userId" | "createdAt" | "updatedAt">,
+  ) =>
+    request<Commitment>("/api/commitments", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   updateCommitment: (id: string, data: Partial<Commitment>) =>
-    request<Commitment>(`/api/commitments/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  deleteCommitment: (id: string) => request<void>(`/api/commitments/${id}`, { method: 'DELETE' }),
+    request<Commitment>(`/api/commitments/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteCommitment: (id: string) =>
+    request<void>(`/api/commitments/${id}`, { method: "DELETE" }),
 };
