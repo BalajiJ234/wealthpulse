@@ -2,14 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, DollarSign, PiggyBank, Users, Settings } from "lucide-react";
+import { Home, DollarSign, PiggyBank, Users, Settings, CreditCard, Calendar, Smartphone, LayoutDashboard } from "lucide-react";
 import Logo from "./Logo";
 
-// Simplified navigation - 5 items only
+// Navigation items
 const navItems = [
-  { href: "/", label: "Dashboard", icon: Home },
+  { href: "/", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transactions", icon: DollarSign },
-  { href: "/planning", label: "Budget & Goals", icon: PiggyBank },
+  { href: "/debts", label: "Debts", icon: CreditCard },
+  { href: "/commitments", label: "Commitments", icon: Calendar },
+  { href: "/iphone-decision", label: "iPhone?", icon: Smartphone },
+  { href: "/planning", label: "Budget", icon: PiggyBank },
   { href: "/splits", label: "Splits", icon: Users },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
