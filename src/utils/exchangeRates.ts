@@ -51,9 +51,35 @@ const FALLBACK_RATES: Record<string, number> = {
   'SGD': 1.34,
   'HKD': 7.82,
   'KRW': 1320.0,
+  'SEK': 10.8,
+  'NOK': 10.9,
+  'DKK': 6.9,
+  'PLN': 4.0,
+  'CZK': 23.0,
+  'HUF': 360.0,
+  'RUB': 90.0,
+  'BRL': 5.0,
+  'MXN': 17.0,
   'AED': 3.67,
   'SAR': 3.75,
+  'QAR': 3.64,
+  'TRY': 35.0,
+  'ZAR': 18.0,
+  'EGP': 50.0,
+  'THB': 36.0,
+  'MYR': 4.7,
+  'IDR': 16000.0,
+  'PHP': 58.0,
+  'VND': 25000.0,
 }
+
+const API_SUPPORTED_BASE_CURRENCIES = new Set([
+  'AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP',
+  'HKD', 'HUF', 'IDR', 'ILS', 'INR', 'ISK', 'JPY', 'KRW', 'MXN', 'MYR',
+  'NOK', 'NZD', 'PHP', 'PLN', 'RON', 'SEK', 'SGD', 'THB', 'TRY', 'USD', 'ZAR',
+])
+
+const USD_BASE = 'USD'
 
 /**
  * Get fallback exchange rate when API is unavailable
@@ -68,8 +94,72 @@ function getFallbackRate(fromCurrency: string, toCurrency: string): number {
   return toRate / fromRate
 }
 
-// Frankfurter API base URL
-const API_BASE = 'https://api.frankfurter.app'
+// Frankfurter API base URL (migrated from .app to .dev)
+const API_BASE = 'https://api.frankfurter.dev/v1'
+
+function createFallbackRates(baseCurrency: string): ExchangeRates {
+  const rates: Record<string, number> = { [baseCurrency]: 1 }
+
+  for (const code of Object.keys(FALLBACK_RATES)) {
+    rates[code] = getFallbackRate(baseCurrency, code)
+  }
+
+  return {
+    base: baseCurrency,
+    date: new Date().toISOString().split('T')[0],
+    rates,
+  }
+}
+
+function isApiSupportedBaseCurrency(baseCurrency: string): boolean {
+  return API_SUPPORTED_BASE_CURRENCIES.has(baseCurrency)
+}
+
+function buildRatesFromUsdFeed(baseCurrency: string, usdRates: ExchangeRates): ExchangeRates {
+  const basePerUsd = FALLBACK_RATES[baseCurrency]
+
+  if (!basePerUsd || basePerUsd <= 0) {
+    return createFallbackRates(baseCurrency)
+  }
+
+  const rates: Record<string, number> = { [baseCurrency]: 1 }
+
+  // USD feed contains "1 USD = X currency". Convert to "1 baseCurrency = Y currency".
+  rates[USD_BASE] = 1 / basePerUsd
+
+  for (const [code, usdToCode] of Object.entries(usdRates.rates)) {
+    rates[code] = usdToCode / basePerUsd
+  }
+
+  // Ensure we still provide values for currencies missing from live feed.
+  for (const code of Object.keys(FALLBACK_RATES)) {
+    if (!rates[code]) {
+      rates[code] = getFallbackRate(baseCurrency, code)
+    }
+  }
+
+  return {
+    base: baseCurrency,
+    date: usdRates.date,
+    rates,
+  }
+}
+
+async function fetchUsdRates(date?: string): Promise<ExchangeRates | null> {
+  const endpoint = date ? `${API_BASE}/${date}?from=${USD_BASE}` : `${API_BASE}/latest?from=${USD_BASE}`
+  const response = await fetch(endpoint)
+
+  if (!response.ok) {
+    return null
+  }
+
+  const data = await response.json()
+  return {
+    base: USD_BASE,
+    date: data.date,
+    rates: { [USD_BASE]: 1, ...data.rates },
+  }
+}
 
 /**
  * Fetch latest exchange rates
@@ -87,9 +177,22 @@ export async function fetchLatestRates(baseCurrency: string = 'USD'): Promise<Ex
       // Otherwise, we'll convert from cached EUR rates
     }
 
+    if (!isApiSupportedBaseCurrency(baseCurrency)) {
+      const usdRates = await fetchUsdRates()
+      const derived = usdRates
+        ? buildRatesFromUsdFeed(baseCurrency, usdRates)
+        : createFallbackRates(baseCurrency)
+
+      cacheLatestRates(derived)
+      return derived
+    }
+
     // Fetch from API
     const response = await fetch(`${API_BASE}/latest?from=${baseCurrency}`)
     if (!response.ok) {
+      if (response.status === 404) {
+        return createFallbackRates(baseCurrency)
+      }
       throw new Error(`API error: ${response.status}`)
     }
 
@@ -105,10 +208,10 @@ export async function fetchLatestRates(baseCurrency: string = 'USD'): Promise<Ex
 
     return rates
   } catch (error) {
-    console.error('Failed to fetch latest exchange rates:', error)
-    // Return cached data if available (even if stale)
+    console.warn('Failed to fetch latest exchange rates, using fallback/cached rates:', error)
+    // Return cached data if available (even if stale), otherwise fallback set
     const cached = getCachedLatestRates()
-    return cached?.data || null
+    return cached?.data || createFallbackRates(baseCurrency)
   }
 }
 
@@ -128,9 +231,22 @@ export async function fetchHistoricalRates(
       return cached[cacheKey]
     }
 
+    if (!isApiSupportedBaseCurrency(baseCurrency)) {
+      const usdRates = await fetchUsdRates(date)
+      const derived = usdRates
+        ? buildRatesFromUsdFeed(baseCurrency, usdRates)
+        : createFallbackRates(baseCurrency)
+
+      cacheHistoricalRates(cacheKey, derived)
+      return derived
+    }
+
     // Fetch from API
     const response = await fetch(`${API_BASE}/${date}?from=${baseCurrency}`)
     if (!response.ok) {
+      if (response.status === 404) {
+        return createFallbackRates(baseCurrency)
+      }
       throw new Error(`API error: ${response.status}`)
     }
 
@@ -146,7 +262,7 @@ export async function fetchHistoricalRates(
 
     return rates
   } catch (error) {
-    console.error(`Failed to fetch historical rates for ${date}:`, error)
+    console.warn(`Failed to fetch historical rates for ${date}, using latest/fallback rates:`, error)
     // Fall back to latest rates if historical not available
     return fetchLatestRates(baseCurrency)
   }

@@ -54,6 +54,8 @@ export default function ExchangeRateWidget({ className = '', compact = false }: 
           </button>
         </div>
 
+        <p className="text-xs text-gray-500 mb-3">Base: 1 {settings.currency}</p>
+
         {loading && !rates ? (
           <div className="animate-pulse space-y-2">
             {[1, 2, 3].map(i => (
@@ -79,8 +81,8 @@ export default function ExchangeRateWidget({ className = '', compact = false }: 
                       <span className="text-base">{currency.flag}</span>
                       <span className="text-sm text-gray-600">{code}</span>
                     </div>
-                    <span className="text-sm font-medium text-gray-900">
-                      {rate ? rate.toFixed(4) : '—'}
+                    <span className="text-sm font-medium text-gray-900" title={`1 ${settings.currency} = ${rate ? rate.toFixed(4) : '—'} ${code}`}>
+                      {rate ? `${rate.toFixed(4)} ${code}` : '—'}
                     </span>
                   </div>
                 )
