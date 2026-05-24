@@ -46,7 +46,12 @@ import {
 } from "@/utils/currency";
 import ResponsiveModal, { useMobileModal } from "@/components/ui/MobileModal";
 import BulkImport from "@/components/BulkImport";
-import MobileExpenseForm, { type ExpenseFormData } from "@/components/forms/MobileExpenseForm";
+import MobileExpenseForm, {
+  type ExpenseFormData,
+} from "@/components/forms/MobileExpenseForm";
+import MobileIncomeForm, {
+  type IncomeFormData,
+} from "@/components/forms/MobileIncomeForm";
 
 // Income categories
 const incomeCategories: {
@@ -330,7 +335,9 @@ export default function TransactionsPage() {
       currency: formData.currency || settings.currency,
       isRecurring: formData.isRecurring || false,
       notes: formData.notes || undefined,
-      recurringPeriod: formData.isRecurring ? formData.recurringFrequency : undefined,
+      recurringPeriod: formData.isRecurring
+        ? formData.recurringFrequency
+        : undefined,
       createdAt: new Date().toISOString(),
     };
     dispatch(addExpense(newExpense));
@@ -350,7 +357,9 @@ export default function TransactionsPage() {
             currency: formData.currency,
             isRecurring: formData.isRecurring || false,
             notes: formData.notes || undefined,
-            recurringPeriod: formData.isRecurring ? formData.recurringFrequency : undefined,
+            recurringPeriod: formData.isRecurring
+              ? formData.recurringFrequency
+              : undefined,
           },
         }),
       );
@@ -366,19 +375,19 @@ export default function TransactionsPage() {
   };
 
   // Income handlers
-  const handleAddIncome = (incomeData: Partial<Income>) => {
+  const handleAddIncome = (formData: IncomeFormData) => {
     const newIncome: Income = {
       id: Date.now().toString(),
-      amount: incomeData.amount || 0,
-      source: incomeData.source || "",
-      category: incomeData.category || "salary",
-      currency: incomeData.currency || settings.currency,
-      status: incomeData.status || "received",
-      eventDate: incomeData.eventDate || new Date().toISOString().split("T")[0],
-      recurrence: incomeData.recurrence || "one-time",
-      tags: incomeData.tags || [],
-      notes: incomeData.notes,
-      linkedGoalIds: incomeData.linkedGoalIds || [],
+      amount: parseFloat(formData.amount) || 0,
+      source: formData.source || "",
+      category: formData.category as IncomeCategory,
+      currency: formData.currency || settings.currency,
+      status: formData.status || "received",
+      eventDate: formData.eventDate || new Date().toISOString().split("T")[0],
+      recurrence: formData.recurrence as IncomeRecurrence,
+      tags: [],
+      notes: formData.notes || undefined,
+      linkedGoalIds: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -386,13 +395,20 @@ export default function TransactionsPage() {
     addModal.closeModal();
   };
 
-  const handleEditIncome = (incomeData: Partial<Income>) => {
+  const handleEditIncome = (formData: IncomeFormData) => {
     if (editingIncome) {
       dispatch(
         updateIncome({
           id: editingIncome.id,
           updates: {
-            ...incomeData,
+            amount: parseFloat(formData.amount) || 0,
+            source: formData.source,
+            category: formData.category as IncomeCategory,
+            currency: formData.currency,
+            status: formData.status,
+            eventDate: formData.eventDate,
+            recurrence: formData.recurrence as IncomeRecurrence,
+            notes: formData.notes || undefined,
             updatedAt: new Date().toISOString(),
           },
         }),
@@ -968,11 +984,9 @@ export default function TransactionsPage() {
             onCancel={addModal.closeModal}
           />
         ) : (
-          <IncomeForm
+          <MobileIncomeForm
             onSubmit={handleAddIncome}
             onCancel={addModal.closeModal}
-            currency={currency}
-            settings={settings}
           />
         )}
       </ResponsiveModal>
@@ -994,17 +1008,32 @@ export default function TransactionsPage() {
               description: editingExpense.description,
               date: editingExpense.date,
               isRecurring: editingExpense.isRecurring,
-              recurringFrequency: (editingExpense.recurringPeriod as 'daily' | 'weekly' | 'monthly' | 'yearly') || 'monthly',
-              notes: editingExpense.notes || '',
+              recurringFrequency:
+                (editingExpense.recurringPeriod as
+                  | "daily"
+                  | "weekly"
+                  | "monthly"
+                  | "yearly") || "monthly",
+              notes: editingExpense.notes || "",
             }}
           />
         ) : editingIncome ? (
-          <IncomeForm
+          <MobileIncomeForm
             onSubmit={handleEditIncome}
             onCancel={editModal.closeModal}
-            currency={currency}
-            settings={settings}
-            initialData={editingIncome}
+            isEditing={true}
+            initialData={{
+              source: editingIncome.source,
+              amount: String(editingIncome.amount),
+              currency: editingIncome.currency,
+              category: editingIncome.category,
+              status: editingIncome.status as "received" | "scheduled",
+              eventDate: editingIncome.eventDate,
+              recurrence:
+                (editingIncome.recurrence as IncomeFormData["recurrence"]) ||
+                "monthly",
+              notes: editingIncome.notes || "",
+            }}
           />
         ) : null}
       </ResponsiveModal>

@@ -296,9 +296,12 @@ function GoalsTab() {
         <div className='bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-4'>
           <ShieldCheck className='w-8 h-8 text-amber-500 shrink-0' />
           <div className='flex-1 min-w-0'>
-            <p className='text-sm font-semibold text-amber-800'>Set up your Emergency Fund</p>
+            <p className='text-sm font-semibold text-amber-800'>
+              Set up your Emergency Fund
+            </p>
             <p className='text-xs text-amber-600 mt-0.5'>
-              Financial experts recommend 3–6 months of expenses saved. Tap to create a goal.
+              Financial experts recommend 3–6 months of expenses saved. Tap to
+              create a goal.
             </p>
           </div>
           <button
@@ -327,7 +330,11 @@ function GoalsTab() {
       </div>
 
       {showBulkImport && (
-        <BulkImport feature='goals' onImport={handleBulkImport} onClose={() => setShowBulkImport(false)} />
+        <BulkImport
+          feature='goals'
+          onImport={handleBulkImport}
+          onClose={() => setShowBulkImport(false)}
+        />
       )}
 
       {showForm && (
@@ -545,7 +552,9 @@ function CommitmentsTab() {
 
   const handleBulkImport = async (data: unknown[]) => {
     for (const item of data as Commitment[]) {
-      try { await api.createCommitment(item); } catch {}
+      try {
+        await api.createCommitment(item);
+      } catch {}
     }
     setShowBulkImport(false);
     load();
@@ -624,7 +633,11 @@ function CommitmentsTab() {
       </div>
 
       {showBulkImport && (
-        <BulkImport feature='commitments' onImport={handleBulkImport} onClose={() => setShowBulkImport(false)} />
+        <BulkImport
+          feature='commitments'
+          onImport={handleBulkImport}
+          onClose={() => setShowBulkImport(false)}
+        />
       )}
 
       {showForm && (
@@ -860,7 +873,9 @@ function DebtStrategyTab() {
 
   const handleBulkImport = async (data: unknown[]) => {
     for (const item of data as Debt[]) {
-      try { await api.createDebt(item); } catch {}
+      try {
+        await api.createDebt(item);
+      } catch {}
     }
     setShowBulkImport(false);
     load();
@@ -955,7 +970,11 @@ function DebtStrategyTab() {
       </div>
 
       {showBulkImport && (
-        <BulkImport feature='debts' onImport={handleBulkImport} onClose={() => setShowBulkImport(false)} />
+        <BulkImport
+          feature='debts'
+          onImport={handleBulkImport}
+          onClose={() => setShowBulkImport(false)}
+        />
       )}
 
       {showForm && (
