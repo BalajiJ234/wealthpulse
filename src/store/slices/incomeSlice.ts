@@ -115,6 +115,14 @@ const incomeSlice = createSlice({
       state.loading = false
       state.error = null
     },
+    setIncomes: (state, action: PayloadAction<Income[]>) => {
+      const sanitized = action.payload.map(income => ({
+        ...income,
+        linkedGoalIds: income.linkedGoalIds ?? [],
+      }))
+      state.incomes = sanitized
+      recalculateTotals(state)
+    },
   },
 })
 
@@ -126,6 +134,7 @@ export const {
   setIncomeLoading,
   setIncomeError,
   clearIncome,
+  setIncomes,
 } = incomeSlice.actions
 
 // Selectors

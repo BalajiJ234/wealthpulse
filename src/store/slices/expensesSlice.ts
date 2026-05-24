@@ -89,6 +89,10 @@ const expensesSlice = createSlice({
       state.expenses = [];
       state.totalSpent = 0;
     },
+    setExpenses: (state, action: PayloadAction<Expense[]>) => {
+      state.expenses = action.payload;
+      state.totalSpent = action.payload.reduce((sum, e) => sum + e.amount, 0);
+    },
   },
 });
 
@@ -100,6 +104,7 @@ export const {
   setLoading,
   setError,
   clearExpenses,
+  setExpenses,
 } = expensesSlice.actions;
 
 // Selectors - Note: RootState will be imported from store/index.ts in components

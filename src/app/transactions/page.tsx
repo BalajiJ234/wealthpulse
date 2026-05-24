@@ -25,6 +25,7 @@ import {
   updateIncome,
   deleteIncome,
   bulkImportIncome,
+  setIncomes,
   selectIncomes,
   type Income,
   type IncomeCategory,
@@ -35,9 +36,11 @@ import {
   updateExpense,
   deleteExpense,
   bulkImportExpenses,
+  setExpenses,
   selectExpenses,
   type Expense,
 } from "@/store/slices/expensesSlice";
+import { api, type Transaction } from "@/lib/api";
 import { useSettings } from "@/contexts/SettingsContext";
 import {
   formatAmount,
@@ -177,7 +180,15 @@ export default function TransactionsPage() {
   useEffect(() => {
     setIsClient(true);
     document.title = "Transactions - WealthPulse";
-  }, []);
+    // Sync from DB on mount
+    Promise.all([
+      api.getTransactions({ type: "EXPENSE" }),
+      api.getTransactions({ type: "INCOME" }),
+    ]).then(([expenseTxns, incomeTxns]) => {
+      dispatch(setExpenses(expenseTxns.map(txToExpense)));
+      dispatch(setIncomes(incomeTxns.map(txToIncome)));
+    }).catch(() => { /* keep local state if API unreachable */ });
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset pagination when tab changes
   useEffect(() => {
@@ -324,111 +335,158 @@ export default function TransactionsPage() {
     );
   };
 
+  // ── DB ↔ Redux mapping helpers ──────────────────────────────────────────
+  const txToExpense = (tx: Transaction): Expense => ({
+    id: tx.id,
+    amount: tx.amount,
+    description: tx.title,
+    category: tx.category,
+    date: tx.transactionDate,
+    currency: tx.currency,
+    isRecurring: tx.isRecurring,
+    notes: tx.notes ?? undefined,
+    createdAt: tx.createdAt,
+  });
+
+  const txToIncome = (tx: Transaction): Income => ({
+    id: tx.id,
+    amount: tx.amount,
+    source: tx.title,
+    category: (tx.category as IncomeCategory) || "other",
+    currency: tx.currency,
+    status: "received" as const,
+    eventDate: tx.transactionDate,
+    recurrence: tx.isRecurring ? ("monthly" as IncomeRecurrence) : ("one-time" as IncomeRecurrence),
+    tags: [],
+    notes: tx.notes ?? undefined,
+    linkedGoalIds: [],
+    createdAt: tx.createdAt,
+    updatedAt: tx.updatedAt,
+  });
+
   // Expense handlers
-  const handleAddExpense = (formData: ExpenseFormData) => {
-    const newExpense: Expense = {
-      id: Date.now().toString(),
-      amount: parseFloat(formData.amount) || 0,
-      description: formData.description || "",
-      category: formData.category || "Other",
-      date: formData.date || new Date().toISOString().split("T")[0],
+  const handleAddExpense = async (formData: ExpenseFormData) => {
+    const amount = parseFloat(formData.amount) || 0;
+    const tx = await api.createTransaction({
+      type: "EXPENSE",
+      title: formData.description || "",
+      amount,
       currency: formData.currency || settings.currency,
+      exchangeRate: 1,
+      convertedAmount: amount,
+      baseCurrency: settings.currency,
+      category: formData.category || "Other",
+      transactionDate: formData.date || new Date().toISOString().split("T")[0],
       isRecurring: formData.isRecurring || false,
       notes: formData.notes || undefined,
-      recurringPeriod: formData.isRecurring
-        ? formData.recurringFrequency
-        : undefined,
-      createdAt: new Date().toISOString(),
-    };
-    dispatch(addExpense(newExpense));
+    });
+    dispatch(addExpense(txToExpense(tx)));
     addModal.closeModal();
   };
 
-  const handleEditExpense = (formData: ExpenseFormData) => {
+  const handleEditExpense = async (formData: ExpenseFormData) => {
     if (editingExpense) {
-      dispatch(
-        updateExpense({
-          id: editingExpense.id,
-          updates: {
-            amount: parseFloat(formData.amount) || 0,
-            description: formData.description,
-            category: formData.category,
-            date: formData.date,
-            currency: formData.currency,
-            isRecurring: formData.isRecurring || false,
-            notes: formData.notes || undefined,
-            recurringPeriod: formData.isRecurring
-              ? formData.recurringFrequency
-              : undefined,
-          },
-        }),
-      );
+      const amount = parseFloat(formData.amount) || 0;
+      const tx = await api.updateTransaction(editingExpense.id, {
+        title: formData.description,
+        amount,
+        currency: formData.currency,
+        category: formData.category,
+        transactionDate: formData.date,
+        isRecurring: formData.isRecurring || false,
+        notes: formData.notes || undefined,
+      });
+      dispatch(updateExpense({ id: editingExpense.id, updates: txToExpense(tx) }));
       setEditingExpense(null);
       editModal.closeModal();
     }
   };
 
-  const handleDeleteExpense = (id: string) => {
+  const handleDeleteExpense = async (id: string) => {
     if (confirm("Are you sure you want to delete this expense?")) {
+      await api.deleteTransaction(id);
       dispatch(deleteExpense(id));
     }
   };
 
   // Income handlers
-  const handleAddIncome = (formData: IncomeFormData) => {
-    const newIncome: Income = {
-      id: Date.now().toString(),
-      amount: parseFloat(formData.amount) || 0,
-      source: formData.source || "",
-      category: formData.category as IncomeCategory,
+  const handleAddIncome = async (formData: IncomeFormData) => {
+    const amount = parseFloat(formData.amount) || 0;
+    const tx = await api.createTransaction({
+      type: "INCOME",
+      title: formData.source || "",
+      amount,
       currency: formData.currency || settings.currency,
-      status: formData.status || "received",
-      eventDate: formData.eventDate || new Date().toISOString().split("T")[0],
-      recurrence: formData.recurrence as IncomeRecurrence,
-      tags: [],
+      exchangeRate: 1,
+      convertedAmount: amount,
+      baseCurrency: settings.currency,
+      category: formData.category || "other",
+      transactionDate: formData.eventDate || new Date().toISOString().split("T")[0],
+      isRecurring: formData.recurrence !== "one-time",
       notes: formData.notes || undefined,
-      linkedGoalIds: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    dispatch(addIncome(newIncome));
+    });
+    dispatch(addIncome(txToIncome(tx)));
     addModal.closeModal();
   };
 
-  const handleEditIncome = (formData: IncomeFormData) => {
+  const handleEditIncome = async (formData: IncomeFormData) => {
     if (editingIncome) {
-      dispatch(
-        updateIncome({
-          id: editingIncome.id,
-          updates: {
-            amount: parseFloat(formData.amount) || 0,
-            source: formData.source,
-            category: formData.category as IncomeCategory,
-            currency: formData.currency,
-            status: formData.status,
-            eventDate: formData.eventDate,
-            recurrence: formData.recurrence as IncomeRecurrence,
-            notes: formData.notes || undefined,
-            updatedAt: new Date().toISOString(),
-          },
-        }),
-      );
+      const amount = parseFloat(formData.amount) || 0;
+      const tx = await api.updateTransaction(editingIncome.id, {
+        title: formData.source,
+        amount,
+        currency: formData.currency,
+        category: formData.category,
+        transactionDate: formData.eventDate,
+        isRecurring: formData.recurrence !== "one-time",
+        notes: formData.notes || undefined,
+      });
+      dispatch(updateIncome({ id: editingIncome.id, updates: txToIncome(tx) }));
       setEditingIncome(null);
       editModal.closeModal();
     }
   };
 
-  const handleDeleteIncome = (id: string) => {
+  const handleDeleteIncome = async (id: string) => {
     if (confirm("Are you sure you want to delete this income entry?")) {
+      await api.deleteTransaction(id);
       dispatch(deleteIncome(id));
     }
   };
 
-  const handleBulkImport = (data: unknown[]) => {
+  const handleBulkImport = async (data: unknown[]) => {
     if (activeTab === "income") {
-      dispatch(bulkImportIncome(data as Income[]));
+      const txns = (data as Partial<Income>[]).map((item) => ({
+        type: "INCOME" as const,
+        title: item.source || "",
+        amount: item.amount || 0,
+        currency: item.currency || settings.currency,
+        exchangeRate: 1,
+        convertedAmount: item.amount || 0,
+        baseCurrency: settings.currency,
+        category: item.category || "other",
+        transactionDate: item.eventDate || new Date().toISOString().split("T")[0],
+        isRecurring: false,
+      }));
+      await api.bulkCreateTransactions(txns);
+      const refreshed = await api.getTransactions({ type: "INCOME" });
+      dispatch(setIncomes(refreshed.map(txToIncome)));
     } else if (activeTab === "expenses") {
-      dispatch(bulkImportExpenses(data as Expense[]));
+      const txns = (data as Partial<Expense>[]).map((item) => ({
+        type: "EXPENSE" as const,
+        title: item.description || "",
+        amount: item.amount || 0,
+        currency: item.currency || settings.currency,
+        exchangeRate: 1,
+        convertedAmount: item.amount || 0,
+        baseCurrency: settings.currency,
+        category: item.category || "Other",
+        transactionDate: item.date || new Date().toISOString().split("T")[0],
+        isRecurring: item.isRecurring || false,
+      }));
+      await api.bulkCreateTransactions(txns);
+      const refreshed = await api.getTransactions({ type: "EXPENSE" });
+      dispatch(setExpenses(refreshed.map(txToExpense)));
     }
     setShowBulkImport(false);
   };
