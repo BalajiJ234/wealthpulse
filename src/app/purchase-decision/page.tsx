@@ -57,7 +57,11 @@ export default function PurchaseDecisionPage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await api.getPurchaseDecision(itemName, Number(price), Number(emiMonths));
+      const r = await api.getPurchaseDecision(
+        itemName,
+        Number(price),
+        Number(emiMonths),
+      );
       setResult(r);
     } catch (e: unknown) {
       setError((e as Error).message);
@@ -72,13 +76,12 @@ export default function PurchaseDecisionPage() {
     <main className='max-w-xl mx-auto px-4 py-8 space-y-6'>
       <div className='flex items-center gap-3'>
         <ShoppingCart className='w-6 h-6 text-gray-700' />
-        <h1 className='text-2xl font-bold text-gray-900'>
-          Purchase Decision
-        </h1>
+        <h1 className='text-2xl font-bold text-gray-900'>Purchase Decision</h1>
       </div>
       <p className='text-sm text-gray-500'>
         Enter what you want to buy, its price, and your preferred payment plan.
-        The engine analyses your current financial health and gives a recommendation.
+        The engine analyses your current financial health and gives a
+        recommendation.
       </p>
 
       <div className='bg-white rounded-xl border border-gray-200 p-5 shadow-sm space-y-4'>
@@ -142,7 +145,9 @@ export default function PurchaseDecisionPage() {
             <cfg.icon className={`w-7 h-7 ${cfg.color}`} />
             <div>
               {itemName && (
-                <p className='text-xs text-gray-500 font-medium mb-0.5'>{itemName}</p>
+                <p className='text-xs text-gray-500 font-medium mb-0.5'>
+                  {itemName}
+                </p>
               )}
               <p className={`text-xl font-bold ${cfg.color}`}>{cfg.label}</p>
               <p className='text-xs text-gray-500'>

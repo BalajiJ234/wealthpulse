@@ -34,6 +34,7 @@ import {
   addExpense,
   updateExpense,
   deleteExpense,
+  bulkImportExpenses,
   selectExpenses,
   type Expense,
 } from "@/store/slices/expensesSlice";
@@ -191,7 +192,7 @@ export default function TransactionsPage() {
 
   const thisMonthExpenseTotal = thisMonthExpenses.reduce(
     (sum, expense) => sum + expense.amount,
-    0
+    0,
   );
 
   const thisMonthIncome = incomes.filter((income) => {
@@ -204,7 +205,7 @@ export default function TransactionsPage() {
 
   const thisMonthIncomeTotal = thisMonthIncome.reduce(
     (sum, income) => sum + income.amount,
-    0
+    0,
   );
 
   // Filter and sort expenses
@@ -217,7 +218,7 @@ export default function TransactionsPage() {
       filtered = filtered.filter(
         (e) =>
           e.description.toLowerCase().includes(query) ||
-          e.category.toLowerCase().includes(query)
+          e.category.toLowerCase().includes(query),
       );
     }
 
@@ -259,7 +260,7 @@ export default function TransactionsPage() {
       filtered = filtered.filter(
         (i) =>
           i.source.toLowerCase().includes(query) ||
-          i.category.toLowerCase().includes(query)
+          i.category.toLowerCase().includes(query),
       );
     }
 
@@ -295,7 +296,7 @@ export default function TransactionsPage() {
   const totalPages = Math.ceil(currentItems.length / itemsPerPage);
   const paginatedItems = currentItems.slice(
     (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
+    currentPage * itemsPerPage,
   );
 
   const handleSort = (field: SortField) => {
@@ -339,7 +340,7 @@ export default function TransactionsPage() {
         updateExpense({
           id: editingExpense.id,
           updates: expenseData,
-        })
+        }),
       );
       setEditingExpense(null);
       editModal.closeModal();
@@ -382,7 +383,7 @@ export default function TransactionsPage() {
             ...incomeData,
             updatedAt: new Date().toISOString(),
           },
-        })
+        }),
       );
       setEditingIncome(null);
       editModal.closeModal();
@@ -398,6 +399,8 @@ export default function TransactionsPage() {
   const handleBulkImport = (data: unknown[]) => {
     if (activeTab === "income") {
       dispatch(bulkImportIncome(data as Income[]));
+    } else if (activeTab === "expenses") {
+      dispatch(bulkImportExpenses(data as Expense[]));
     }
     setShowBulkImport(false);
   };
@@ -447,7 +450,7 @@ export default function TransactionsPage() {
           </p>
         </div>
         <div className='flex items-center space-x-2'>
-          {activeTab === "income" && (
+          {(activeTab === "income" || activeTab === "expenses") && (
             <button
               onClick={() => setShowBulkImport(true)}
               className='flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors'>
@@ -510,7 +513,7 @@ export default function TransactionsPage() {
               <p className='text-xl md:text-2xl font-bold mt-1'>
                 {formatAmount(
                   thisMonthIncomeTotal - thisMonthExpenseTotal,
-                  currency
+                  currency,
                 )}
               </p>
             </div>
@@ -581,7 +584,7 @@ export default function TransactionsPage() {
               value={filterStatus}
               onChange={(e) =>
                 setFilterStatus(
-                  e.target.value as "all" | "received" | "scheduled"
+                  e.target.value as "all" | "received" | "scheduled",
                 )
               }
               className='px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white'>
@@ -694,7 +697,7 @@ export default function TransactionsPage() {
                         <span
                           className={`px-2 py-1 text-xs font-medium rounded-full ${getCategoryColor(
                             expense.category,
-                            "expense"
+                            "expense",
                           )}`}>
                           {expense.category}
                         </span>
@@ -740,7 +743,7 @@ export default function TransactionsPage() {
                         <span
                           className={`px-2 py-1 text-xs font-medium rounded-full ${getCategoryColor(
                             income.category,
-                            "income"
+                            "income",
                           )}`}>
                           {income.category}
                         </span>
@@ -750,8 +753,8 @@ export default function TransactionsPage() {
                         {formatAmount(
                           income.amount,
                           getCurrencyByCode(
-                            income.currency || settings.currency
-                          )
+                            income.currency || settings.currency,
+                          ),
                         )}{" "}
                         {income.currency || settings.currency}
                       </td>
@@ -812,7 +815,7 @@ export default function TransactionsPage() {
                   <span
                     className={`px-2 py-1 text-xs font-medium rounded-full ${getCategoryColor(
                       expense.category,
-                      "expense"
+                      "expense",
                     )}`}>
                     {expense.category}
                   </span>
@@ -853,7 +856,7 @@ export default function TransactionsPage() {
                     +
                     {formatAmount(
                       income.amount,
-                      getCurrencyByCode(income.currency || settings.currency)
+                      getCurrencyByCode(income.currency || settings.currency),
                     )}
                   </span>
                 </div>
@@ -862,7 +865,7 @@ export default function TransactionsPage() {
                     <span
                       className={`px-2 py-1 text-xs font-medium rounded-full ${getCategoryColor(
                         income.category,
-                        "income"
+                        "income",
                       )}`}>
                       {income.category}
                     </span>
