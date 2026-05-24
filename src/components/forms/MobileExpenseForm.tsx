@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Calendar, DollarSign, Tag, Type, Clock, FileText, Sparkles } from 'lucide-react'
 
-interface ExpenseFormData {
+export interface ExpenseFormData {
   amount: string
   currency: string
   category: string

@@ -46,6 +46,7 @@ import {
 } from "@/utils/currency";
 import ResponsiveModal, { useMobileModal } from "@/components/ui/MobileModal";
 import BulkImport from "@/components/BulkImport";
+import MobileExpenseForm, { type ExpenseFormData } from "@/components/forms/MobileExpenseForm";
 
 // Income categories
 const incomeCategories: {
@@ -319,27 +320,38 @@ export default function TransactionsPage() {
   };
 
   // Expense handlers
-  const handleAddExpense = (expenseData: Partial<Expense>) => {
+  const handleAddExpense = (formData: ExpenseFormData) => {
     const newExpense: Expense = {
       id: Date.now().toString(),
-      amount: expenseData.amount || 0,
-      description: expenseData.description || "",
-      category: expenseData.category || "other",
-      date: expenseData.date || new Date().toISOString().split("T")[0],
-      currency: settings.currency,
-      isRecurring: expenseData.isRecurring || false,
+      amount: parseFloat(formData.amount) || 0,
+      description: formData.description || "",
+      category: formData.category || "Other",
+      date: formData.date || new Date().toISOString().split("T")[0],
+      currency: formData.currency || settings.currency,
+      isRecurring: formData.isRecurring || false,
+      notes: formData.notes || undefined,
+      recurringPeriod: formData.isRecurring ? formData.recurringFrequency : undefined,
       createdAt: new Date().toISOString(),
     };
     dispatch(addExpense(newExpense));
     addModal.closeModal();
   };
 
-  const handleEditExpense = (expenseData: Partial<Expense>) => {
+  const handleEditExpense = (formData: ExpenseFormData) => {
     if (editingExpense) {
       dispatch(
         updateExpense({
           id: editingExpense.id,
-          updates: expenseData,
+          updates: {
+            amount: parseFloat(formData.amount) || 0,
+            description: formData.description,
+            category: formData.category,
+            date: formData.date,
+            currency: formData.currency,
+            isRecurring: formData.isRecurring || false,
+            notes: formData.notes || undefined,
+            recurringPeriod: formData.isRecurring ? formData.recurringFrequency : undefined,
+          },
         }),
       );
       setEditingExpense(null);
@@ -951,10 +963,9 @@ export default function TransactionsPage() {
         onClose={addModal.closeModal}
         title={`Add ${activeTab === "expenses" ? "Expense" : "Income"}`}>
         {activeTab === "expenses" ? (
-          <ExpenseForm
+          <MobileExpenseForm
             onSubmit={handleAddExpense}
             onCancel={addModal.closeModal}
-            currency={currency}
           />
         ) : (
           <IncomeForm
@@ -972,11 +983,20 @@ export default function TransactionsPage() {
         onClose={editModal.closeModal}
         title={`Edit ${editingExpense ? "Expense" : "Income"}`}>
         {editingExpense ? (
-          <ExpenseForm
+          <MobileExpenseForm
             onSubmit={handleEditExpense}
             onCancel={editModal.closeModal}
-            currency={currency}
-            initialData={editingExpense}
+            isEditing={true}
+            initialData={{
+              amount: String(editingExpense.amount),
+              currency: editingExpense.currency,
+              category: editingExpense.category,
+              description: editingExpense.description,
+              date: editingExpense.date,
+              isRecurring: editingExpense.isRecurring,
+              recurringFrequency: (editingExpense.recurringPeriod as 'daily' | 'weekly' | 'monthly' | 'yearly') || 'monthly',
+              notes: editingExpense.notes || '',
+            }}
           />
         ) : editingIncome ? (
           <IncomeForm
